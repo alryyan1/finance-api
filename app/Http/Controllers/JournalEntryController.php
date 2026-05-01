@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\JournalEntry;
+use App\Services\PdfReport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 
@@ -132,6 +134,63 @@ class JournalEntryController extends Controller
         $journalEntry->update(['is_posted' => ! $journalEntry->is_posted]);
 
         return response()->json($journalEntry->fresh());
+    }
+
+    public function voucher(JournalEntry $journalEntry): Response
+    {
+        $entry = $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name');
+
+        $status = $entry->is_posted ? 'مرحَّل' : 'مسودة';
+        $pdf    = PdfReport::make(
+            'سند قيد يومي',
+            "رقم: {$entry->id}   |   التاريخ: {$entry->date}   |   الحالة: {$status}"
+        );
+
+        // Info box
+        $pdf->SetFont('dejavusans', '', 9);
+        if ($entry->reference) {
+            $pdf->Cell(190, 7, 'المرجع: ' . $entry->reference, 0, 1, 'R');
+        }
+        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->Cell(190, 8, 'البيان: ' . $entry->description, 'B', 1, 'R');
+        $pdf->Ln(4);
+
+        // Lines table
+        $cols   = [10, 20, 70, 45, 45];  // #, Code, Account, Debit, Credit
+        $pdf->tableHead(['#', 'الرمز', 'اسم الحساب', 'مدين', 'دائن'], $cols);
+
+        $odd = false;
+        foreach ($entry->lines as $i => $line) {
+            $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+            $debit  = (float) $line->debit  > 0 ? PdfReport::n($line->debit)  : '—';
+            $credit = (float) $line->credit > 0 ? PdfReport::n($line->credit) : '—';
+            $pdf->Cell($cols[0], 7, (string) ($i + 1),          1, 0, 'C', true);
+            $pdf->Cell($cols[1], 7, $line->account->code,        1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, $line->account->name,        1, 0, 'R', true);
+            $pdf->Cell($cols[3], 7, $debit,                      1, 0, 'C', true);
+            $pdf->Cell($cols[4], 7, $credit,                     1, 1, 'C', true);
+            $odd = !$odd;
+        }
+
+        $totalDebit  = $entry->lines->sum(fn ($l) => (float) $l->debit);
+        $totalCredit = $entry->lines->sum(fn ($l) => (float) $l->credit);
+        $pdf->totalsRow(
+            ['', '', 'الإجمالي', PdfReport::n($totalDebit), PdfReport::n($totalCredit)],
+            $cols
+        );
+
+        // Signature area
+        $pdf->Ln(15);
+        $pdf->SetFont('dejavusans', '', 9);
+        $pdf->SetDrawColor(150, 150, 150);
+        $sig = 58;
+        $gap = 16;
+        foreach (['المعد', 'المراجع', 'المدير المالي'] as $role) {
+            $pdf->Cell($sig, 7, $role, 'B', 0, 'C');
+            $pdf->Cell($gap, 7, '', 0, 0);
+        }
+
+        return $pdf->respond("voucher-{$entry->id}.pdf");
     }
 
     private function assertBalanced(array $lines): void
