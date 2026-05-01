@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\FiscalYear;
 use App\Models\JournalEntry;
 use App\Services\PdfReport;
 use Illuminate\Http\JsonResponse;
@@ -69,6 +70,7 @@ class JournalEntryController extends Controller
         ]);
 
         $this->assertBalanced($data['lines']);
+        $this->assertNotLocked($data['date']);
 
         $entry = DB::transaction(function () use ($data) {
             $entry = JournalEntry::create(Arr::except($data, ['lines']));
@@ -103,6 +105,7 @@ class JournalEntryController extends Controller
         ]);
 
         $this->assertBalanced($data['lines']);
+        $this->assertNotLocked($data['date']);
 
         DB::transaction(function () use ($journalEntry, $data) {
             $journalEntry->update(Arr::except($data, ['lines']));
@@ -122,6 +125,7 @@ class JournalEntryController extends Controller
         if ($journalEntry->is_posted) {
             return response()->json(['message' => 'لا يمكن حذف قيد مرحَّل'], 422);
         }
+        $this->assertNotLocked($journalEntry->date->toDateString());
 
         $journalEntry->lines()->delete();
         $journalEntry->delete();
@@ -131,6 +135,7 @@ class JournalEntryController extends Controller
 
     public function post(JournalEntry $journalEntry): JsonResponse
     {
+        $this->assertNotLocked($journalEntry->date->toDateString());
         $journalEntry->update(['is_posted' => ! $journalEntry->is_posted]);
 
         return response()->json($journalEntry->fresh());
@@ -240,6 +245,13 @@ class JournalEntryController extends Controller
 
         if (abs($debit - $credit) > 0.005) {
             abort(422, 'مجموع المدين يجب أن يساوي مجموع الدائن');
+        }
+    }
+
+    private function assertNotLocked(string $date): void
+    {
+        if (FiscalYear::isDateLocked($date)) {
+            abort(422, 'لا يمكن تعديل قيود في سنة مالية مغلقة');
         }
     }
 }

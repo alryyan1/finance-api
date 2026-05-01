@@ -3,6 +3,7 @@
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\JournalEntryController;
 use App\Http\Controllers\PartyController;
 use App\Http\Controllers\ReportController;
@@ -17,6 +18,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [LoginController::class, 'logout']);
 
     Route::get('dashboard', [DashboardController::class, 'index']);
+    Route::get('fiscal-years',                              [FiscalYearController::class, 'index']);
+    Route::post('fiscal-years',                             [FiscalYearController::class, 'store']);
+    Route::post('fiscal-years/{fiscal_year}/close',         [FiscalYearController::class, 'close']);
+    Route::post('fiscal-years/{fiscal_year}/reopen',        [FiscalYearController::class, 'reopen']);
     Route::get('settings',         [SettingController::class,       'index']);
     Route::put('settings',         [SettingController::class,       'update']);
     Route::get('opening-balances', [OpeningBalanceController::class,'index']);
