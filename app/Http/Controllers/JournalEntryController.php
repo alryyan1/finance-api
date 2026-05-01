@@ -136,6 +136,46 @@ class JournalEntryController extends Controller
         return response()->json($journalEntry->fresh());
     }
 
+    public function reverse(JournalEntry $journalEntry): JsonResponse
+    {
+        if (! $journalEntry->is_posted) {
+            return response()->json(['message' => 'يمكن عكس القيود المرحَّلة فقط'], 422);
+        }
+
+        if ($journalEntry->reversed_by) {
+            return response()->json(['message' => 'تم عكس هذا القيد مسبقاً'], 422);
+        }
+
+        $reversal = DB::transaction(function () use ($journalEntry) {
+            $reversal = JournalEntry::create([
+                'date'        => now()->toDateString(),
+                'reference'   => 'REV-' . $journalEntry->id,
+                'description' => 'عكس: ' . $journalEntry->description,
+                'is_posted'   => true,
+                'reversal_of' => $journalEntry->id,
+            ]);
+
+            foreach ($journalEntry->lines as $line) {
+                $reversal->lines()->create([
+                    'account_id'  => $line->account_id,
+                    'party_id'    => $line->party_id,
+                    'description' => $line->description,
+                    'debit'       => $line->credit,   // swap
+                    'credit'      => $line->debit,    // swap
+                ]);
+            }
+
+            $journalEntry->update(['reversed_by' => $reversal->id]);
+
+            return $reversal;
+        });
+
+        return response()->json(
+            $reversal->load('lines.account:id,code,name', 'lines.party:id,name'),
+            201
+        );
+    }
+
     public function voucher(JournalEntry $journalEntry): Response
     {
         $entry = $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name');
