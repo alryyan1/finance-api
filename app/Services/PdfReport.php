@@ -6,15 +6,15 @@ use TCPDF;
 
 class PdfReport extends TCPDF
 {
-    private array  $company = [];
-    private string $title   = '';
-    private string $sub     = '';
+    protected array  $reportCompany = [];
+    protected string $reportTitle   = '';
+    protected string $reportSub     = '';
 
     public function setup(array $company, string $title, string $sub = ''): static
     {
-        $this->company = $company;
-        $this->title   = $title;
-        $this->sub     = $sub;
+        $this->reportCompany = $company;
+        $this->reportTitle   = $title;
+        $this->reportSub     = $sub;
         return $this;
     }
 
@@ -24,29 +24,29 @@ class PdfReport extends TCPDF
 
         $this->SetFont('dejavusans', 'B', 14);
         $this->SetY(5);
-        $this->Cell($w, 7, $this->company['company_name'] ?? 'الشركة', 0, 1, 'C');
+        $this->Cell($w, 7, $this->reportCompany['company_name'] ?? 'الشركة', 0, 1, 'C');
 
-        if (!empty($this->company['company_address'])) {
+        if (!empty($this->reportCompany['company_address'])) {
             $this->SetFont('dejavusans', '', 9);
             $this->SetTextColor(80, 80, 80);
-            $this->Cell($w, 5, $this->company['company_address'], 0, 1, 'C');
+            $this->Cell($w, 5, $this->reportCompany['company_address'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
-        if (!empty($this->company['company_phone'])) {
+        if (!empty($this->reportCompany['company_phone'])) {
             $this->SetFont('dejavusans', '', 8);
             $this->SetTextColor(100, 100, 100);
-            $this->Cell($w, 4, $this->company['company_phone'], 0, 1, 'C');
+            $this->Cell($w, 4, $this->reportCompany['company_phone'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
         $this->SetFont('dejavusans', 'B', 11);
-        $this->Cell($w, 7, $this->title, 0, 1, 'C');
+        $this->Cell($w, 7, $this->reportTitle, 0, 1, 'C');
 
-        if ($this->sub) {
+        if ($this->reportSub) {
             $this->SetFont('dejavusans', '', 9);
             $this->SetTextColor(80, 80, 80);
-            $this->Cell($w, 5, $this->sub, 0, 1, 'C');
+            $this->Cell($w, 5, $this->reportSub, 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
