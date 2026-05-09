@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class FiscalYear extends Model
 {
     protected $fillable = [
-        'name', 'start_date', 'end_date', 'status', 'closing_entry_id', 'closed_at',
+        'name', 'period_type', 'start_date', 'end_date', 'status', 'closing_entry_id', 'closed_at',
     ];
 
     protected $casts = [

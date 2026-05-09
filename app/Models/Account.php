@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Account extends Model
 {
-    protected $fillable = ['code', 'name', 'type', 'parent_id', 'is_active'];
+    protected $fillable = ['code', 'name', 'type', 'sub_type', 'parent_id', 'is_active'];
 
     protected $casts = [
         'is_active' => 'boolean',

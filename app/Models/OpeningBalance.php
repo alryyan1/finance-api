@@ -7,18 +7,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class OpeningBalance extends Model
 {
-    protected $primaryKey  = 'account_id';
-    public    $incrementing = false;
-
-    protected $fillable = ['account_id', 'debit', 'credit'];
+    protected $fillable = ['fiscal_year_id', 'account_id', 'debit', 'credit'];
 
     protected $casts = [
-        'debit'  => 'decimal:2',
-        'credit' => 'decimal:2',
+        'debit'          => 'decimal:2',
+        'credit'         => 'decimal:2',
+        'fiscal_year_id' => 'integer',
     ];
 
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    public function fiscalYear(): BelongsTo
+    {
+        return $this->belongsTo(FiscalYear::class);
     }
 }

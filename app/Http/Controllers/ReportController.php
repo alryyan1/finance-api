@@ -15,21 +15,26 @@ class ReportController extends Controller
 
     public function trialBalance(Request $request): JsonResponse
     {
-        ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
-        $data = $this->trialBalanceData($from, $to);
-        return response()->json($data);
+        ['from' => $from, 'to' => $to, 'fiscal_year_id' => $fyId] = $this->validateDateRange($request);
+        return response()->json($this->trialBalanceData($from, $to, $fyId));
     }
 
     public function ledger(Request $request): JsonResponse
     {
         $request->validate([
-            'account_id' => ['required', 'integer', 'exists:accounts,id'],
-            'from'       => ['nullable', 'date'],
-            'to'         => ['nullable', 'date', 'after_or_equal:from'],
+            'account_id'     => ['required', 'integer', 'exists:accounts,id'],
+            'party_id'       => ['nullable', 'integer', 'exists:parties,id'],
+            'from'           => ['nullable', 'date'],
+            'to'             => ['nullable', 'date', 'after_or_equal:from'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
         ]);
-        $from = $request->input('from', now()->startOfYear()->toDateString());
-        $to   = $request->input('to',   now()->toDateString());
-        return response()->json($this->ledgerData((int) $request->input('account_id'), $from, $to));
+        [$from, $to] = $this->resolveDates($request, now()->startOfYear()->toDateString(), now()->toDateString());
+        return response()->json($this->ledgerData(
+            (int) $request->input('account_id'),
+            $from,
+            $to,
+            $request->input('party_id') ? (int) $request->input('party_id') : null
+        ));
     }
 
     public function incomeStatement(Request $request): JsonResponse
@@ -40,9 +45,18 @@ class ReportController extends Controller
 
     public function balanceSheet(Request $request): JsonResponse
     {
-        $request->validate(['as_of' => ['nullable', 'date']]);
-        $asOf = $request->input('as_of', now()->toDateString());
-        return response()->json($this->balanceSheetData($asOf));
+        $request->validate([
+            'as_of'          => ['nullable', 'date'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+        $fyId = $request->input('fiscal_year_id') ? (int) $request->input('fiscal_year_id') : null;
+        if ($fyId) {
+            $fy   = \App\Models\FiscalYear::findOrFail($fyId);
+            $asOf = $fy->end_date->toDateString();
+        } else {
+            $asOf = $request->input('as_of', now()->toDateString());
+        }
+        return response()->json($this->balanceSheetData($asOf, $fyId));
     }
 
     // ────────────────────────────── PDF endpoints ───────────────────────────────
@@ -50,40 +64,74 @@ class ReportController extends Controller
     public function trialBalancePdf(Request $request): Response
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+        $viewType = $request->input('view_type', 'both'); // totals | balances | both
         $data = $this->trialBalanceData($from, $to);
 
-        $pdf = PdfReport::make('ميزان المراجعة', "الفترة من {$from} إلى {$to}");
-
-        $cols = [20, 82, 29, 29, 30];
-        $pdf->tableHead(['الرمز', 'اسم الحساب', 'مدين', 'دائن', 'الرصيد'], $cols);
+        $subtitles = [
+            'totals'   => 'بالمجاميع',
+            'balances' => 'بالأرصدة',
+            'both'     => 'بالمجاميع والأرصدة',
+        ];
+        $subtitle = "الفترة من {$from} إلى {$to} — " . ($subtitles[$viewType] ?? $subtitles['both']);
+        $pdf = PdfReport::make('ميزان المراجعة', $subtitle);
 
         $typeLabels = ['asset' => 'أصول', 'liability' => 'خصوم', 'equity' => 'حقوق الملكية', 'revenue' => 'إيرادات', 'expense' => 'مصروفات'];
         $typeOrder  = ['asset', 'liability', 'equity', 'revenue', 'expense'];
-        $odd        = false;
 
+        if ($viewType === 'totals') {
+            $cols = [20, 112, 29, 29];
+            $pdf->tableHead(['الرمز', 'اسم الحساب', 'مجموع مدين', 'مجموع دائن'], $cols);
+        } elseif ($viewType === 'balances') {
+            $cols = [20, 112, 29, 29];
+            $pdf->tableHead(['الرمز', 'اسم الحساب', 'رصيد مدين', 'رصيد دائن'], $cols);
+        } else {
+            $cols = [20, 68, 25, 25, 26, 26];
+            $pdf->tableHead(['الرمز', 'اسم الحساب', 'مجموع مدين', 'مجموع دائن', 'رصيد مدين', 'رصيد دائن'], $cols);
+        }
+
+        $odd = false;
         foreach ($typeOrder as $type) {
             $group = collect($data['rows'])->where('type', $type)->values();
             if ($group->isEmpty()) continue;
-
             $pdf->sectionHead($typeLabels[$type]);
 
             foreach ($group as $row) {
                 $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
-                $side = $row['balance_side'] === 'debit' ? ' م' : ' د';
-                $pdf->Cell($cols[0], 7, $row['code'],                          1, 0, 'C', true);
-                $pdf->Cell($cols[1], 7, $row['name'],                          1, 0, 'R', true);
-                $pdf->Cell($cols[2], 7, PdfReport::n($row['total_debit']),     1, 0, 'C', true);
-                $pdf->Cell($cols[3], 7, PdfReport::n($row['total_credit']),    1, 0, 'C', true);
-                $pdf->Cell($cols[4], 7, PdfReport::n($row['balance']) . $side, 1, 1, 'C', true);
+                $pdf->Cell($cols[0], 7, $row['code'], 1, 0, 'C', true);
+                $pdf->Cell($cols[1], 7, $row['name'], 1, 0, 'R', true);
+                if ($viewType === 'totals') {
+                    $pdf->Cell($cols[2], 7, PdfReport::n($row['total_debit']),  1, 0, 'C', true);
+                    $pdf->Cell($cols[3], 7, PdfReport::n($row['total_credit']), 1, 1, 'C', true);
+                } elseif ($viewType === 'balances') {
+                    $pdf->Cell($cols[2], 7, PdfReport::n($row['balance_debit']),  1, 0, 'C', true);
+                    $pdf->Cell($cols[3], 7, PdfReport::n($row['balance_credit']), 1, 1, 'C', true);
+                } else {
+                    $pdf->Cell($cols[2], 7, PdfReport::n($row['total_debit']),    1, 0, 'C', true);
+                    $pdf->Cell($cols[3], 7, PdfReport::n($row['total_credit']),   1, 0, 'C', true);
+                    $pdf->Cell($cols[4], 7, PdfReport::n($row['balance_debit']),  1, 0, 'C', true);
+                    $pdf->Cell($cols[5], 7, PdfReport::n($row['balance_credit']), 1, 1, 'C', true);
+                }
                 $odd = !$odd;
             }
         }
 
         $t = $data['totals'];
-        $pdf->totalsRow(
-            ['الإجمالي', PdfReport::n($t['debit']), PdfReport::n($t['credit']), $t['balanced'] ? '✓ متوازن' : 'غير متوازن'],
-            [$cols[0] + $cols[1], $cols[2], $cols[3], $cols[4]]
-        );
+        if ($viewType === 'totals') {
+            $pdf->totalsRow(
+                ['الإجمالي', PdfReport::n($t['debit']), PdfReport::n($t['credit'])],
+                [$cols[0] + $cols[1], $cols[2], $cols[3]]
+            );
+        } elseif ($viewType === 'balances') {
+            $pdf->totalsRow(
+                ['الإجمالي', PdfReport::n($t['balance_debit']), PdfReport::n($t['balance_credit'])],
+                [$cols[0] + $cols[1], $cols[2], $cols[3]]
+            );
+        } else {
+            $pdf->totalsRow(
+                ['الإجمالي', PdfReport::n($t['debit']), PdfReport::n($t['credit']), PdfReport::n($t['balance_debit']), PdfReport::n($t['balance_credit'])],
+                [$cols[0] + $cols[1], $cols[2], $cols[3], $cols[4], $cols[5]]
+            );
+        }
 
         return $pdf->respond('trial-balance.pdf');
     }
@@ -92,12 +140,18 @@ class ReportController extends Controller
     {
         $request->validate([
             'account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'party_id'   => ['nullable', 'integer', 'exists:parties,id'],
             'from'       => ['nullable', 'date'],
             'to'         => ['nullable', 'date', 'after_or_equal:from'],
         ]);
         $from = $request->input('from', now()->startOfYear()->toDateString());
         $to   = $request->input('to',   now()->toDateString());
-        $data = $this->ledgerData((int) $request->input('account_id'), $from, $to);
+        $data = $this->ledgerData(
+            (int) $request->input('account_id'),
+            $from,
+            $to,
+            $request->input('party_id') ? (int) $request->input('party_id') : null
+        );
 
         $acct = $data['account'];
         $pdf  = PdfReport::make(
@@ -266,16 +320,39 @@ class ReportController extends Controller
     private function validateDateRange(Request $request): array
     {
         $request->validate([
-            'from' => ['nullable', 'date'],
-            'to'   => ['nullable', 'date', 'after_or_equal:from'],
+            'from'           => ['nullable', 'date'],
+            'to'             => ['nullable', 'date', 'after_or_equal:from'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
         ]);
+
+        $fyId = $request->input('fiscal_year_id') ? (int) $request->input('fiscal_year_id') : null;
+        if ($fyId) {
+            $fy   = \App\Models\FiscalYear::findOrFail($fyId);
+            $from = $fy->start_date->toDateString();
+            $to   = $fy->end_date->toDateString();
+        } else {
+            $from = $request->input('from', now()->startOfYear()->toDateString());
+            $to   = $request->input('to',   now()->toDateString());
+        }
+
+        return ['from' => $from, 'to' => $to, 'fiscal_year_id' => $fyId];
+    }
+
+    /** Resolve from/to dates, preferring fiscal_year_id if provided. */
+    private function resolveDates(Request $request, string $defaultFrom, string $defaultTo): array
+    {
+        $fyId = $request->input('fiscal_year_id') ? (int) $request->input('fiscal_year_id') : null;
+        if ($fyId) {
+            $fy = \App\Models\FiscalYear::findOrFail($fyId);
+            return [$fy->start_date->toDateString(), $fy->end_date->toDateString()];
+        }
         return [
-            'from' => $request->input('from', now()->startOfYear()->toDateString()),
-            'to'   => $request->input('to',   now()->toDateString()),
+            $request->input('from', $defaultFrom),
+            $request->input('to',   $defaultTo),
         ];
     }
 
-    private function trialBalanceData(string $from, string $to): array
+    private function trialBalanceData(string $from, string $to, ?int $fiscalYearId = null): array
     {
         $journalRows = DB::table('journal_entry_lines as l')
             ->join('accounts as a', 'a.id', '=', 'l.account_id')
@@ -291,6 +368,10 @@ class ReportController extends Controller
 
         $openings = DB::table('opening_balances as ob')
             ->join('accounts as a', 'a.id', '=', 'ob.account_id')
+            ->when($fiscalYearId,
+                fn ($q) => $q->where('ob.fiscal_year_id', $fiscalYearId),
+                fn ($q) => $q->whereNull('ob.fiscal_year_id')
+            )
             ->select('a.id as account_id', 'a.code', 'a.name', 'a.type',
                 'ob.debit as total_debit', 'ob.credit as total_credit')
             ->get()->keyBy('account_id');
@@ -302,39 +383,49 @@ class ReportController extends Controller
             $base  = $j ?? $o;
             $debit  = (float) ($j->total_debit  ?? 0) + (float) ($o->total_debit  ?? 0);
             $credit = (float) ($j->total_credit ?? 0) + (float) ($o->total_credit ?? 0);
+            $net    = $debit - $credit;
             return [
-                'account_id'   => $base->account_id,
-                'code'         => $base->code,
-                'name'         => $base->name,
-                'type'         => $base->type,
-                'total_debit'  => number_format($debit,           2, '.', ''),
-                'total_credit' => number_format($credit,          2, '.', ''),
-                'balance'      => number_format(abs($debit - $credit), 2, '.', ''),
-                'balance_side' => $debit >= $credit ? 'debit' : 'credit',
+                'account_id'     => $base->account_id,
+                'code'           => $base->code,
+                'name'           => $base->name,
+                'type'           => $base->type,
+                'total_debit'    => number_format($debit,        2, '.', ''),
+                'total_credit'   => number_format($credit,       2, '.', ''),
+                'balance'        => number_format(abs($net),     2, '.', ''),
+                'balance_side'   => $net >= 0 ? 'debit' : 'credit',
+                'balance_debit'  => number_format($net > 0 ? $net : 0,   2, '.', ''),
+                'balance_credit' => number_format($net < 0 ? -$net : 0,  2, '.', ''),
             ];
         })->sortBy('code')->values();
 
-        $totalDebit  = $rows->sum(fn ($r) => (float) $r['total_debit']);
-        $totalCredit = $rows->sum(fn ($r) => (float) $r['total_credit']);
+        $totalDebit     = $rows->sum(fn ($r) => (float) $r['total_debit']);
+        $totalCredit    = $rows->sum(fn ($r) => (float) $r['total_credit']);
+        $totalBalDebit  = $rows->sum(fn ($r) => (float) $r['balance_debit']);
+        $totalBalCredit = $rows->sum(fn ($r) => (float) $r['balance_credit']);
 
         return [
             'from'   => $from,
             'to'     => $to,
             'rows'   => $rows->values(),
             'totals' => [
-                'debit'    => number_format($totalDebit,  2, '.', ''),
-                'credit'   => number_format($totalCredit, 2, '.', ''),
-                'balanced' => abs($totalDebit - $totalCredit) < 0.005,
+                'debit'          => number_format($totalDebit,      2, '.', ''),
+                'credit'         => number_format($totalCredit,     2, '.', ''),
+                'balance_debit'  => number_format($totalBalDebit,   2, '.', ''),
+                'balance_credit' => number_format($totalBalCredit,  2, '.', ''),
+                'balanced'       => abs($totalDebit - $totalCredit) < 0.005,
             ],
         ];
     }
 
-    private function ledgerData(int $accountId, string $from, string $to): array
+    private function ledgerData(int $accountId, string $from, string $to, ?int $partyId = null): array
     {
         $account     = Account::findOrFail($accountId);
         $debitNormal = in_array($account->type, ['asset', 'expense']);
 
-        $storedOb    = DB::table('opening_balances')->where('account_id', $accountId)->first();
+        $storedOb    = DB::table('opening_balances')
+            ->where('account_id', $accountId)
+            ->whereNull('fiscal_year_id')   // ledger always uses global opening balance
+            ->first();
         $storedObNet = $debitNormal
             ? ((float) ($storedOb->debit ?? 0) - (float) ($storedOb->credit ?? 0))
             : ((float) ($storedOb->credit ?? 0) - (float) ($storedOb->debit ?? 0));
@@ -342,6 +433,7 @@ class ReportController extends Controller
         $prePeriod = DB::table('journal_entry_lines as l')
             ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
             ->where('l.account_id', $accountId)->where('e.is_posted', true)->where('e.date', '<', $from)
+            ->when($partyId, fn ($q) => $q->where('l.party_id', $partyId))
             ->selectRaw('SUM(l.debit) as d, SUM(l.credit) as c')->first();
 
         $openingBalance = $storedObNet + ($debitNormal
@@ -353,6 +445,7 @@ class ReportController extends Controller
             ->leftJoin('parties as p', 'p.id', '=', 'l.party_id')
             ->where('l.account_id', $accountId)->where('e.is_posted', true)
             ->whereBetween('e.date', [$from, $to])
+            ->when($partyId, fn ($q) => $q->where('l.party_id', $partyId))
             ->select('e.id as entry_id', 'e.date', 'e.reference', 'e.description as entry_description',
                 'l.description as line_description', 'l.debit', 'l.credit', 'p.name as party_name')
             ->orderBy('e.date')->orderBy('e.id')->orderBy('l.id')->get();
@@ -439,21 +532,25 @@ class ReportController extends Controller
         ];
     }
 
-    private function balanceSheetData(string $asOf): array
+    private function balanceSheetData(string $asOf, ?int $fiscalYearId = null): array
     {
         $journalBalances = DB::table('journal_entry_lines as l')
             ->join('accounts as a', 'a.id', '=', 'l.account_id')
             ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
             ->where('e.is_posted', true)->where('e.date', '<=', $asOf)
             ->whereIn('a.type', ['asset', 'liability', 'equity', 'revenue', 'expense'])
-            ->select('a.id as account_id', 'a.code', 'a.name', 'a.type',
+            ->select('a.id as account_id', 'a.code', 'a.name', 'a.type', 'a.sub_type',
                 DB::raw('SUM(l.debit) as total_debit'), DB::raw('SUM(l.credit) as total_credit'))
-            ->groupBy('a.id', 'a.code', 'a.name', 'a.type')->orderBy('a.code')->get()->keyBy('account_id');
+            ->groupBy('a.id', 'a.code', 'a.name', 'a.type', 'a.sub_type')->orderBy('a.code')->get()->keyBy('account_id');
 
         $openings = DB::table('opening_balances as ob')
             ->join('accounts as a', 'a.id', '=', 'ob.account_id')
             ->whereIn('a.type', ['asset', 'liability', 'equity'])
-            ->select('ob.account_id', 'a.code', 'a.name', 'a.type',
+            ->when($fiscalYearId,
+                fn ($q) => $q->where('ob.fiscal_year_id', $fiscalYearId),
+                fn ($q) => $q->whereNull('ob.fiscal_year_id')
+            )
+            ->select('ob.account_id', 'a.code', 'a.name', 'a.type', 'a.sub_type',
                 'ob.debit as total_debit', 'ob.credit as total_credit')
             ->get()->keyBy('account_id');
 
@@ -467,6 +564,7 @@ class ReportController extends Controller
                 'code'         => $base->code,
                 'name'         => $base->name,
                 'type'         => $base->type,
+                'sub_type'     => $base->sub_type,
                 'total_debit'  => (float) ($j->total_debit  ?? 0) + (float) ($o->total_debit  ?? 0),
                 'total_credit' => (float) ($j->total_credit ?? 0) + (float) ($o->total_credit ?? 0),
             ];
@@ -479,9 +577,15 @@ class ReportController extends Controller
             'balance'    => number_format($dn ? ($row->total_debit - $row->total_credit) : ($row->total_credit - $row->total_debit), 2, '.', ''),
         ];
 
-        $assets      = $balances->where('type', 'asset')     ->map(fn ($r) => $mapRow($r, true))->values();
-        $liabilities = $balances->where('type', 'liability')  ->map(fn ($r) => $mapRow($r, false))->values();
-        $equity      = $balances->where('type', 'equity')     ->map(fn ($r) => $mapRow($r, false))->values();
+        $assets      = $balances->where('type', 'asset')    ->map(fn ($r) => $mapRow($r, true))->values();
+        $liabilities = $balances->where('type', 'liability')->map(fn ($r) => $mapRow($r, false))->values();
+        $equity      = $balances->where('type', 'equity')  ->map(fn ($r) => $mapRow($r, false))->values();
+
+        // Categorised for Form 2 (working capital format)
+        $currentAssets     = $balances->where('type', 'asset')    ->where('sub_type', 'current')    ->map(fn ($r) => $mapRow($r, true))->values();
+        $nonCurrentAssets  = $balances->where('type', 'asset')    ->where('sub_type', 'non_current')->map(fn ($r) => $mapRow($r, true))->values();
+        $currentLiab       = $balances->where('type', 'liability')->where('sub_type', 'current')    ->map(fn ($r) => $mapRow($r, false))->values();
+        $longTermLiab      = $balances->where('type', 'liability')->where('sub_type', 'long_term')  ->map(fn ($r) => $mapRow($r, false))->values();
 
         $revenue   = $balances->where('type', 'revenue')->sum(fn ($r) => (float) $r->total_credit - (float) $r->total_debit);
         $expense   = $balances->where('type', 'expense')->sum(fn ($r) => (float) $r->total_debit  - (float) $r->total_credit);
@@ -493,19 +597,38 @@ class ReportController extends Controller
         $totalEquityNet = $totalEquity + $netProfit;
         $totalLiabEquity = $totalLiab + $totalEquityNet;
 
+        $totalCurrentAssets    = $currentAssets->sum(fn ($r) => (float) $r['balance']);
+        $totalNonCurrentAssets = $nonCurrentAssets->sum(fn ($r) => (float) $r['balance']);
+        $totalCurrentLiab      = $currentLiab->sum(fn ($r) => (float) $r['balance']);
+        $totalLongTermLiab     = $longTermLiab->sum(fn ($r) => (float) $r['balance']);
+        $workingCapital        = $totalCurrentAssets - $totalCurrentLiab;
+        $totalAssetsForm2      = $workingCapital + $totalNonCurrentAssets;
+        $netAssets             = $totalAssetsForm2 - $totalLongTermLiab;
+
         return [
-            'as_of'              => $asOf,
-            'assets'             => $assets->all(),
-            'liabilities'        => $liabilities->all(),
-            'equity'             => $equity->all(),
-            'net_profit'         => number_format($netProfit,       2, '.', ''),
-            'is_profit'          => $netProfit >= 0,
-            'total_assets'       => number_format($totalAssets,     2, '.', ''),
-            'total_liabilities'  => number_format($totalLiab,       2, '.', ''),
-            'total_equity'       => number_format($totalEquity,     2, '.', ''),
-            'total_equity_net'   => number_format($totalEquityNet,  2, '.', ''),
-            'total_liab_equity'  => number_format($totalLiabEquity, 2, '.', ''),
-            'balanced'           => abs($totalAssets - $totalLiabEquity) < 0.005,
+            'as_of'                     => $asOf,
+            'assets'                    => $assets->all(),
+            'liabilities'               => $liabilities->all(),
+            'equity'                    => $equity->all(),
+            'net_profit'                => number_format($netProfit,           2, '.', ''),
+            'is_profit'                 => $netProfit >= 0,
+            'total_assets'              => number_format($totalAssets,         2, '.', ''),
+            'total_liabilities'         => number_format($totalLiab,           2, '.', ''),
+            'total_equity'              => number_format($totalEquity,         2, '.', ''),
+            'total_equity_net'          => number_format($totalEquityNet,      2, '.', ''),
+            'total_liab_equity'         => number_format($totalLiabEquity,     2, '.', ''),
+            'balanced'                  => abs($totalAssets - $totalLiabEquity) < 0.005,
+            // Form 2 (working capital format)
+            'current_assets'            => $currentAssets->all(),
+            'non_current_assets'        => $nonCurrentAssets->all(),
+            'current_liabilities'       => $currentLiab->all(),
+            'long_term_liabilities'     => $longTermLiab->all(),
+            'total_current_assets'      => number_format($totalCurrentAssets,    2, '.', ''),
+            'total_non_current_assets'  => number_format($totalNonCurrentAssets, 2, '.', ''),
+            'total_current_liabilities' => number_format($totalCurrentLiab,      2, '.', ''),
+            'total_long_term_liabilities'=> number_format($totalLongTermLiab,    2, '.', ''),
+            'working_capital'           => number_format($workingCapital,         2, '.', ''),
+            'net_assets'                => number_format($netAssets,              2, '.', ''),
         ];
     }
 }

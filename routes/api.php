@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\AccountController;
+use App\Http\Controllers\CashVoucherController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\JournalEntryController;
@@ -18,10 +19,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [LoginController::class, 'logout']);
 
     Route::get('dashboard', [DashboardController::class, 'index']);
-    Route::get('fiscal-years',                              [FiscalYearController::class, 'index']);
-    Route::post('fiscal-years',                             [FiscalYearController::class, 'store']);
-    Route::post('fiscal-years/{fiscal_year}/close',         [FiscalYearController::class, 'close']);
-    Route::post('fiscal-years/{fiscal_year}/reopen',        [FiscalYearController::class, 'reopen']);
+    Route::get('fiscal-years',                                    [FiscalYearController::class, 'index']);
+    Route::post('fiscal-years',                                   [FiscalYearController::class, 'store']);
+    Route::post('fiscal-years/bulk-months',                       [FiscalYearController::class, 'bulkMonths']);
+    Route::get('fiscal-years/check-date',                         [FiscalYearController::class, 'checkDate']);
+    Route::post('fiscal-years/{fiscal_year}/close',               [FiscalYearController::class, 'close']);
+    Route::post('fiscal-years/{fiscal_year}/reopen',              [FiscalYearController::class, 'reopen']);
+    Route::post('fiscal-years/{fiscal_year}/carry-forward',       [FiscalYearController::class, 'carryForwardManual']);
     Route::get('settings',         [SettingController::class,       'index']);
     Route::put('settings',         [SettingController::class,       'update']);
     Route::get('opening-balances', [OpeningBalanceController::class,'index']);
@@ -34,6 +38,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/income-statement/pdf', [ReportController::class, 'incomeStatementPdf']);
     Route::get('reports/balance-sheet',        [ReportController::class, 'balanceSheet']);
     Route::get('reports/balance-sheet/pdf',    [ReportController::class, 'balanceSheetPdf']);
+    Route::get('cash-vouchers',                                [CashVoucherController::class, 'index']);
+    Route::post('cash-vouchers',                               [CashVoucherController::class, 'store']);
+    Route::delete('cash-vouchers/{cashVoucher}',               [CashVoucherController::class, 'destroy']);
+    Route::get('cash-vouchers/{cashVoucher}/voucher',          [CashVoucherController::class, 'voucher']);
     Route::apiResource('accounts', AccountController::class);
     Route::apiResource('parties', PartyController::class);
     Route::apiResource('journal-entries', JournalEntryController::class);

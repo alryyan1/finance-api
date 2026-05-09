@@ -9,10 +9,24 @@ use Illuminate\Http\Request;
 
 class OpeningBalanceController extends Controller
 {
-    public function index(): JsonResponse
+    /**
+     * GET /api/opening-balances?fiscal_year_id=1
+     * fiscal_year_id omitted → returns legacy global balances (null)
+     */
+    public function index(Request $request): JsonResponse
     {
-        $accounts = Account::orderBy('code')->get(['id', 'code', 'name', 'type']);
-        $balances = OpeningBalance::all()->keyBy('account_id');
+        $request->validate(['fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id']]);
+        $fiscalYearId = $request->input('fiscal_year_id');
+
+        $accounts = Account::orderBy('code')
+            ->whereIn('type', ['asset', 'liability', 'equity'])
+            ->get(['id', 'code', 'name', 'type']);
+
+        $balances = OpeningBalance::when(
+            $fiscalYearId,
+            fn ($q) => $q->where('fiscal_year_id', $fiscalYearId),
+            fn ($q) => $q->whereNull('fiscal_year_id')
+        )->get()->keyBy('account_id');
 
         $result = $accounts->map(fn ($a) => [
             'account_id' => $a->id,
@@ -26,21 +40,42 @@ class OpeningBalanceController extends Controller
         return response()->json($result);
     }
 
+    /**
+     * PUT /api/opening-balances
+     * Body: { fiscal_year_id?: number, rows: [{account_id, debit, credit}] }
+     */
     public function update(Request $request): JsonResponse
     {
-        $data = $request->validate([
-            '*.account_id' => ['required', 'integer', 'exists:accounts,id'],
-            '*.debit'      => ['required', 'numeric', 'min:0'],
-            '*.credit'     => ['required', 'numeric', 'min:0'],
+        $request->validate([
+            'fiscal_year_id'   => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'rows'             => ['required', 'array'],
+            'rows.*.account_id'=> ['required', 'integer', 'exists:accounts,id'],
+            'rows.*.debit'     => ['required', 'numeric', 'min:0'],
+            'rows.*.credit'    => ['required', 'numeric', 'min:0'],
         ]);
 
-        foreach ($data as $row) {
-            OpeningBalance::updateOrCreate(
-                ['account_id' => $row['account_id']],
-                ['debit' => $row['debit'], 'credit' => $row['credit']]
-            );
+        $fiscalYearId = $request->input('fiscal_year_id');
+        $rows         = $request->input('rows');
+
+        foreach ($rows as $row) {
+            OpeningBalance::where('account_id', $row['account_id'])
+                ->when(
+                    $fiscalYearId,
+                    fn ($q) => $q->where('fiscal_year_id', $fiscalYearId),
+                    fn ($q) => $q->whereNull('fiscal_year_id')
+                )
+                ->delete();
+
+            if ((float) $row['debit'] > 0 || (float) $row['credit'] > 0) {
+                OpeningBalance::create([
+                    'fiscal_year_id' => $fiscalYearId,
+                    'account_id'     => $row['account_id'],
+                    'debit'          => $row['debit'],
+                    'credit'         => $row['credit'],
+                ]);
+            }
         }
 
-        return $this->index();
+        return $this->index($request);
     }
 }
