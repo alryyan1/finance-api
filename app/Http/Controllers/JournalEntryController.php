@@ -192,11 +192,11 @@ class JournalEntryController extends Controller
         );
 
         // Info box
-        $pdf->SetFont('dejavusans', '', 9);
+        $pdf->SetFont('arial', '', 9);
         if ($entry->reference) {
             $pdf->Cell(190, 7, 'المرجع: ' . $entry->reference, 0, 1, 'R');
         }
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arialbd', '', 10);
         $pdf->Cell(190, 8, 'البيان: ' . $entry->description, 'B', 1, 'R');
         $pdf->Ln(4);
 
@@ -226,7 +226,7 @@ class JournalEntryController extends Controller
 
         // Signature area
         $pdf->Ln(15);
-        $pdf->SetFont('dejavusans', '', 9);
+        $pdf->SetFont('arial', '', 9);
         $pdf->SetDrawColor(150, 150, 150);
         $sig = 58;
         $gap = 16;

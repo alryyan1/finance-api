@@ -126,13 +126,13 @@ class CashVoucherController extends Controller
         };
 
         $pdf = PdfReport::make($typeAr, 'رقم: ' . ($cashVoucher->reference ?? $cashVoucher->id));
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
 
         $pdf->SetFillColor(245, 247, 250);
         $pdf->SetDrawColor(150, 150, 150);
 
         // Date + reference row
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arialbd', '', 10);
         $pdf->Cell(90, 10, 'التاريخ: ' . $cashVoucher->date->format('Y/m/d'), 1, 0, 'R', true);
         $pdf->Cell(10, 10, '', 0, 0);
         $pdf->Cell(90, 10, 'رقم الإذن: ' . ($cashVoucher->reference ?? $cashVoucher->id), 1, 1, 'R', true);
@@ -141,19 +141,19 @@ class CashVoucherController extends Controller
         // Party row
         $partyName = $cashVoucher->party?->name ?? '—';
         $fromLabel = $cashVoucher->type === 'receipt' ? 'استلمنا من السيد / الجهة:' : 'صرفنا إلى السيد / الجهة:';
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->Cell(190, 10, $fromLabel . '   ' . $partyName, 1, 1, 'R', true);
         $pdf->Ln(3);
 
         // Amount row (highlighted)
         $amount = number_format((float) $cashVoucher->amount, 2);
-        $pdf->SetFont('dejavusans', 'B', 13);
+        $pdf->SetFont('arialbd', '', 13);
         $pdf->SetFillColor(254, 252, 232);
         $pdf->Cell(190, 12, 'مبلغ وقدره:   ' . $amount, 1, 1, 'R', true);
         $pdf->Ln(3);
 
         // Description row
-        $pdf->SetFont('dejavusans', '', 10);
+        $pdf->SetFont('arial', '', 10);
         $pdf->SetFillColor(245, 247, 250);
         $pdf->Cell(190, 10, 'وذلك عن:   ' . ($cashVoucher->description ?? '—'), 1, 1, 'R', true);
         $pdf->Ln(3);
@@ -169,7 +169,7 @@ class CashVoucherController extends Controller
         $pdf->Ln(10);
 
         // Signature boxes
-        $pdf->SetFont('dejavusans', 'B', 9);
+        $pdf->SetFont('arialbd', '', 9);
         $pdf->Cell(58, 9, 'المدير المالي', 1, 0, 'C');
         $pdf->Cell(4, 9, '', 0, 0);
         $pdf->Cell(58, 9, 'أمين الصندوق', 1, 0, 'C');

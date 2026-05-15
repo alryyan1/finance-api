@@ -53,6 +53,10 @@ class AccountController extends Controller
             return response()->json(['message' => 'لا يمكن حذف حساب يحتوي على حسابات فرعية'], 422);
         }
 
+        if ($account->journalEntryLines()->exists()) {
+            return response()->json(['message' => 'لا يمكن حذف حساب مرتبط بقيود محاسبية'], 422);
+        }
+
         $account->delete();
 
         return response()->json(null, 204);

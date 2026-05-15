@@ -24,4 +24,9 @@ class Account extends Model
     {
         return $this->hasMany(Account::class, 'parent_id');
     }
+
+    public function journalEntryLines(): HasMany
+    {
+        return $this->hasMany(JournalEntryLine::class, 'account_id');
+    }
 }

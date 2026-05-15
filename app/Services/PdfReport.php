@@ -22,29 +22,29 @@ class PdfReport extends TCPDF
     {
         $w = $this->getPageWidth() - $this->lMargin - $this->rMargin;
 
-        $this->SetFont('dejavusans', 'B', 14);
+        $this->SetFont('arialbd', '', 14);
         $this->SetY(5);
         $this->Cell($w, 7, $this->reportCompany['company_name'] ?? 'الشركة', 0, 1, 'C');
 
         if (!empty($this->reportCompany['company_address'])) {
-            $this->SetFont('dejavusans', '', 9);
+            $this->SetFont('arial', '', 9);
             $this->SetTextColor(80, 80, 80);
             $this->Cell($w, 5, $this->reportCompany['company_address'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
         if (!empty($this->reportCompany['company_phone'])) {
-            $this->SetFont('dejavusans', '', 8);
+            $this->SetFont('arial', '', 8);
             $this->SetTextColor(100, 100, 100);
             $this->Cell($w, 4, $this->reportCompany['company_phone'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
-        $this->SetFont('dejavusans', 'B', 11);
+        $this->SetFont('arialbd', '', 11);
         $this->Cell($w, 7, $this->reportTitle, 0, 1, 'C');
 
         if ($this->reportSub) {
-            $this->SetFont('dejavusans', '', 9);
+            $this->SetFont('arial', '', 9);
             $this->SetTextColor(80, 80, 80);
             $this->Cell($w, 5, $this->reportSub, 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
@@ -62,7 +62,7 @@ class PdfReport extends TCPDF
     public function Footer(): void
     {
         $this->SetY(-12);
-        $this->SetFont('dejavusans', '', 8);
+        $this->SetFont('arial', '', 8);
         $this->SetTextColor(150, 150, 150);
         $w = $this->getPageWidth() - $this->lMargin - $this->rMargin;
         $this->Cell($w, 5,
@@ -86,7 +86,7 @@ class PdfReport extends TCPDF
         $pdf->SetRTL(true);
         $pdf->setup($company, $title, $sub);
         $pdf->AddPage();
-        $pdf->SetFont('dejavusans', '', 9);
+        $pdf->SetFont('arial', '', 9);
         return $pdf;
     }
 
@@ -106,7 +106,7 @@ class PdfReport extends TCPDF
     /** Draw a styled table header row */
     public function tableHead(array $labels, array $widths, int $h = 7): void
     {
-        $this->SetFont('dejavusans', 'B', 9);
+        $this->SetFont('arialbd', '', 9);
         $this->SetFillColor(51, 65, 85);
         $this->SetTextColor(255, 255, 255);
         foreach (array_map(null, $labels, $widths) as [$label, $w]) {
@@ -115,26 +115,26 @@ class PdfReport extends TCPDF
         $this->Ln();
         $this->SetFillColor(255, 255, 255);
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('dejavusans', '', 9);
+        $this->SetFont('arial', '', 9);
     }
 
     /** Draw a section sub-header spanning the full content width */
     public function sectionHead(string $label, int $h = 6): void
     {
-        $this->SetFont('dejavusans', 'B', 9);
+        $this->SetFont('arialbd', '', 9);
         $this->SetFillColor(226, 232, 240);
         $this->SetTextColor(30, 41, 59);
         $w = $this->getPageWidth() - $this->lMargin - $this->rMargin;
         $this->Cell($w, $h, $label, 1, 1, 'R', true);
         $this->SetFillColor(255, 255, 255);
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('dejavusans', '', 9);
+        $this->SetFont('arial', '', 9);
     }
 
     /** Draw a totals row */
     public function totalsRow(array $values, array $widths, int $h = 7): void
     {
-        $this->SetFont('dejavusans', 'B', 9);
+        $this->SetFont('arialbd', '', 9);
         $this->SetFillColor(241, 245, 249);
         $this->SetTextColor(0, 0, 0);
         foreach (array_map(null, $values, $widths) as [$val, $w]) {
@@ -142,6 +142,6 @@ class PdfReport extends TCPDF
         }
         $this->Ln();
         $this->SetFillColor(255, 255, 255);
-        $this->SetFont('dejavusans', '', 9);
+        $this->SetFont('arial', '', 9);
     }
 }

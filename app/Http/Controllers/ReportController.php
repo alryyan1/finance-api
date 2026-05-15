@@ -165,7 +165,7 @@ class ReportController extends Controller
         // Opening balance row
         $obSide = $data['opening_side'] === 'debit' ? ' م' : ' د';
         $pdf->SetFillColor(241, 245, 249);
-        $pdf->SetFont('dejavusans', 'I', 8);
+        $pdf->SetFont('ariali', '', 8);
         $pdf->Cell($cols[0], 6, $from,                                              1, 0, 'C', true);
         $pdf->Cell($cols[1], 6, '',                                                 1, 0, 'C', true);
         $pdf->Cell($cols[2], 6, 'رصيد افتتاحي',                                    1, 0, 'R', true);
@@ -173,7 +173,7 @@ class ReportController extends Controller
         $pdf->Cell($cols[4], 6, '',                                                 1, 0, 'C', true);
         $pdf->Cell($cols[5], 6, '',                                                 1, 0, 'C', true);
         $pdf->Cell($cols[6], 6, PdfReport::n($data['opening_balance']) . $obSide,  1, 1, 'C', true);
-        $pdf->SetFont('dejavusans', '', 9);
+        $pdf->SetFont('arial', '', 9);
 
         $odd = false;
         foreach ($data['rows'] as $row) {
@@ -241,7 +241,7 @@ class ReportController extends Controller
         // Net profit summary box
         $profit = (float) $data['net_profit'];
         $label  = $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة';
-        $pdf->SetFont('dejavusans', 'B', 11);
+        $pdf->SetFont('arialbd', '', 11);
         $pdf->SetFillColor($data['is_profit'] ? 22 : 220, $data['is_profit'] ? 163 : 38, $data['is_profit'] ? 74 : 38);
         $pdf->SetTextColor(255, 255, 255);
         $pdf->Cell(190, 10, "{$label}: " . PdfReport::n(abs($profit)), 1, 1, 'C', true);
@@ -302,7 +302,7 @@ class ReportController extends Controller
         $pdf->Ln(5);
 
         // Balance check
-        $pdf->SetFont('dejavusans', 'B', 10);
+        $pdf->SetFont('arialbd', '', 10);
         $ok = $data['balanced'];
         $pdf->SetFillColor($ok ? 220 : 254, $ok ? 252 : 226, $ok ? 231 : 226);
         $pdf->SetTextColor($ok ? 21 : 153, $ok ? 128 : 27, $ok ? 61 : 27);

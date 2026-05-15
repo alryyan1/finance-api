@@ -4,4 +4,6 @@ use App\Providers\AppServiceProvider;
 
 return [
     AppServiceProvider::class,
+    Spatie\Permission\PermissionServiceProvider::class,
+    Spatie\Backup\BackupServiceProvider::class,
 ];
