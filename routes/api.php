@@ -54,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('petty-cash/requests/{pettyCashRequest}/approve',          [PettyCashController::class, 'approveRequest']);
     Route::post('petty-cash/requests/{pettyCashRequest}/reject',           [PettyCashController::class, 'rejectRequest']);
     Route::post('petty-cash/requests/{pettyCashRequest}/pay',              [PettyCashController::class, 'payRequest']);
+    Route::get('petty-cash/requests/{pettyCashRequest}/document',          [PettyCashController::class, 'viewDocument']);
     Route::get('petty-cash/replenishments',                                [PettyCashController::class, 'replenishments']);
     Route::post('petty-cash/replenishments',                               [PettyCashController::class, 'storeReplenishment']);
     Route::post('petty-cash/replenishments/{replenishment}/approve',       [PettyCashController::class, 'approveReplenishment']);

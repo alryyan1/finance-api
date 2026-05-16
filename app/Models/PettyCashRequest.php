@@ -12,6 +12,7 @@ class PettyCashRequest extends Model
         'description', 'reference', 'status',
         'approved_by', 'approved_at', 'rejection_reason',
         'paid_by', 'paid_at', 'expense_account_id',
+        'document_path', 'document_original_name',
     ];
 
     protected $casts = [

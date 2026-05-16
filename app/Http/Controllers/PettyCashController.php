@@ -9,6 +9,7 @@ use App\Models\PettyCashRequest;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class PettyCashController extends Controller
 {
@@ -80,11 +81,19 @@ class PettyCashController extends Controller
             'description'       => ['required', 'string', 'max:500'],
             'reference'         => ['nullable', 'string', 'max:50'],
             'expense_account_id'=> ['nullable', 'integer', 'exists:accounts,id'],
+            'document'          => ['nullable', 'file', 'mimes:pdf', 'max:10240'],
         ]);
 
         $data['fund_id'] = $fund->id;
         $data['status']  = 'pending';
 
+        if ($request->hasFile('document')) {
+            $file = $request->file('document');
+            $data['document_path']          = $file->store('petty-cash/documents', 'local');
+            $data['document_original_name'] = $file->getClientOriginalName();
+        }
+
+        unset($data['document']); // remove file object before mass-assign
         $item = PettyCashRequest::create($data);
 
         return response()->json($item->load('expenseAccount:id,code,name'), 201);
@@ -249,5 +258,19 @@ class PettyCashController extends Controller
     public function categories(): JsonResponse
     {
         return response()->json(PettyCashRequest::CATEGORIES);
+    }
+
+    public function viewDocument(PettyCashRequest $pettyCashRequest): \Symfony\Component\HttpFoundation\BinaryFileResponse
+    {
+        abort_if(! $pettyCashRequest->document_path, 404, 'لا يوجد مستند مرفق.');
+
+        $path = storage_path('app/' . $pettyCashRequest->document_path);
+
+        abort_if(! file_exists($path), 404, 'الملف غير موجود.');
+
+        return response()->file($path, [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="' . ($pettyCashRequest->document_original_name ?? 'document.pdf') . '"',
+        ]);
     }
 }
