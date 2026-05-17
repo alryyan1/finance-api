@@ -13,6 +13,7 @@ use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\AiController;
 use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [LoginController::class, 'login']);
@@ -76,4 +77,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::patch('journal-entries/{journal_entry}/post',    [JournalEntryController::class, 'post']);
     Route::post('journal-entries/{journal_entry}/reverse',  [JournalEntryController::class, 'reverse']);
     Route::get('journal-entries/{journal_entry}/voucher',   [JournalEntryController::class, 'voucher']);
+
+    // AI
+    Route::post('ai/chat',               [AiController::class, 'chat']);
+    Route::post('ai/suggest-description',[AiController::class, 'suggestDescription']);
+    Route::post('ai/analyze-report',     [AiController::class, 'analyzeReport']);
 });
