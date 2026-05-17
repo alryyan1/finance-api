@@ -6,7 +6,11 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => [env('FRONTEND_URL', 'http://localhost:5173')],
+    // Supports a single URL or comma-separated list: "https://alroomy.com,https://www.alroomy.com"
+    'allowed_origins' => array_values(array_filter(array_map(
+        'trim',
+        explode(',', env('FRONTEND_URL', 'http://localhost:5173'))
+    ))),
 
     'allowed_origins_patterns' => [],
 

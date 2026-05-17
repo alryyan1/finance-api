@@ -29,6 +29,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('fiscal-years/{fiscal_year}/close',               [FiscalYearController::class, 'close']);
     Route::post('fiscal-years/{fiscal_year}/reopen',              [FiscalYearController::class, 'reopen']);
     Route::post('fiscal-years/{fiscal_year}/carry-forward',       [FiscalYearController::class, 'carryForwardManual']);
+    Route::post('settings/logo',   [SettingController::class,       'uploadLogo']);
+    Route::delete('settings/logo', [SettingController::class,       'deleteLogo']);
     Route::get('settings',         [SettingController::class,       'index']);
     Route::put('settings',         [SettingController::class,       'update']);
     Route::get('opening-balances', [OpeningBalanceController::class,'index']);
