@@ -73,6 +73,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('accounts', AccountController::class);
     Route::apiResource('parties', PartyController::class);
+    Route::get('journal-entries/pdf',                       [JournalEntryController::class, 'listPdf']);
     Route::apiResource('journal-entries', JournalEntryController::class);
     Route::patch('journal-entries/{journal_entry}/post',    [JournalEntryController::class, 'post']);
     Route::post('journal-entries/{journal_entry}/reverse',  [JournalEntryController::class, 'reverse']);

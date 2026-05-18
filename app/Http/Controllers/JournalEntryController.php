@@ -181,6 +181,108 @@ class JournalEntryController extends Controller
         );
     }
 
+    public function listPdf(Request $request): Response
+    {
+        $request->validate([
+            'from'   => ['nullable', 'date'],
+            'to'     => ['nullable', 'date'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:all,posted,draft'],
+        ]);
+
+        $q = JournalEntry::with('lines.account:id,code,name', 'lines.party:id,name')
+            ->orderBy('date')
+            ->orderBy('id');
+
+        if ($from = $request->input('from')) $q->where('date', '>=', $from);
+        if ($to   = $request->input('to'))   $q->where('date', '<=', $to);
+        if ($search = $request->input('search')) {
+            $q->where(fn ($s) =>
+                $s->where('description', 'like', "%{$search}%")
+                  ->orWhere('reference',   'like', "%{$search}%")
+            );
+        }
+        if ($status = $request->input('status')) {
+            if ($status === 'posted') $q->where('is_posted', true);
+            if ($status === 'draft')  $q->where('is_posted', false);
+        }
+
+        $entries = $q->get();
+
+        // Build subtitle
+        $parts = [];
+        if ($from && $to) $parts[] = "الفترة من {$from} إلى {$to}";
+        elseif ($from)    $parts[] = "من {$from}";
+        elseif ($to)      $parts[] = "إلى {$to}";
+        if ($search)      $parts[] = "بحث: {$search}";
+        $subtitle = implode('   |   ', $parts) ?: 'جميع القيود';
+
+        $pdf  = PdfReport::make('دفتر اليومية', $subtitle);
+        $cols = [12, 22, 60, 36, 30, 15, 15];   // #, Code, Account, Party, LineDesc, Debit, Credit
+
+        $grandDebit  = 0.0;
+        $grandCredit = 0.0;
+
+        foreach ($entries as $entry) {
+            $totalDebit  = $entry->lines->sum(fn ($l) => (float) $l->debit);
+            $totalCredit = $entry->lines->sum(fn ($l) => (float) $l->credit);
+            $grandDebit  += $totalDebit;
+            $grandCredit += $totalCredit;
+
+            // ── Entry header bar ──────────────────────────────────────────────
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->SetFillColor(91, 33, 182);   // purple
+            $pdf->SetTextColor(255, 255, 255);
+            $status = $entry->is_posted ? 'مرحَّل' : 'مسودة';
+            $ref    = $entry->reference ? "  ({$entry->reference})" : '';
+            $pdf->Cell(
+                190, 7,
+                "#{$entry->id}   {$entry->date}   {$status}{$ref}   —   {$entry->description}",
+                0, 1, 'R', true
+            );
+            $pdf->SetTextColor(0, 0, 0);
+
+            // ── Lines table ───────────────────────────────────────────────────
+            $pdf->SetFont('arial', '', 8);
+            $pdf->tableHead(['#', 'الرمز', 'اسم الحساب', 'الجهة', 'بيان السطر', 'مدين', 'دائن'], $cols);
+
+            $odd = false;
+            foreach ($entry->lines as $i => $line) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $debit  = (float) $line->debit  > 0 ? PdfReport::n($line->debit)  : '—';
+                $credit = (float) $line->credit > 0 ? PdfReport::n($line->credit) : '—';
+                $pdf->Cell($cols[0], 6, (string) ($i + 1),              1, 0, 'C', true);
+                $pdf->Cell($cols[1], 6, $line->account->code ?? '',      1, 0, 'C', true);
+                $pdf->Cell($cols[2], 6, $line->account->name ?? '',      1, 0, 'R', true);
+                $pdf->Cell($cols[3], 6, $line->party->name  ?? '—',      1, 0, 'R', true);
+                $pdf->Cell($cols[4], 6, $line->description  ?? '',       1, 0, 'R', true);
+                $pdf->Cell($cols[5], 6, $debit,                          1, 0, 'C', true);
+                $pdf->Cell($cols[6], 6, $credit,                         1, 1, 'C', true);
+                $odd = !$odd;
+            }
+
+            $pdf->totalsRow(
+                ['', '', 'إجمالي القيد', '', '', PdfReport::n($totalDebit), PdfReport::n($totalCredit)],
+                $cols
+            );
+            $pdf->Ln(3);
+        }
+
+        // ── Grand total ───────────────────────────────────────────────────────
+        if ($entries->isNotEmpty()) {
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->SetFillColor(30, 64, 175);
+            $pdf->SetTextColor(255, 255, 255);
+            $pdf->Cell(190, 7,
+                'الإجمالي الكلي   مدين: ' . PdfReport::n($grandDebit) . '   دائن: ' . PdfReport::n($grandCredit),
+                0, 1, 'C', true
+            );
+            $pdf->SetTextColor(0, 0, 0);
+        }
+
+        return $pdf->respond('journal-entries.pdf');
+    }
+
     public function voucher(JournalEntry $journalEntry): Response
     {
         $entry = $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name');
