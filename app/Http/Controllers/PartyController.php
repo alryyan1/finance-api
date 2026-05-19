@@ -19,7 +19,7 @@ class PartyController extends Controller
     {
         $validated = $request->validate([
             'name'       => ['required', 'string', 'max:255'],
-            'type'       => ['required', 'in:customer,supplier,employee,other'],
+            'type'       => ['required', 'in:customer,supplier,employee,other,doctor'],
             'phone'      => ['nullable', 'string', 'max:30'],
             'email'      => ['nullable', 'email', 'max:255'],
             'address'    => ['nullable', 'string'],
@@ -36,7 +36,7 @@ class PartyController extends Controller
     {
         $validated = $request->validate([
             'name'       => ['required', 'string', 'max:255'],
-            'type'       => ['required', 'in:customer,supplier,employee,other'],
+            'type'       => ['required', 'in:customer,supplier,employee,other,doctor'],
             'phone'      => ['nullable', 'string', 'max:30'],
             'email'      => ['nullable', 'email', 'max:255'],
             'address'    => ['nullable', 'string'],
