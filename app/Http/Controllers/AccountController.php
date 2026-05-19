@@ -19,7 +19,7 @@ class AccountController extends Controller
             'code'      => ['required', 'string', 'max:20', 'unique:accounts,code'],
             'name'      => ['required', 'string', 'max:255'],
             'type'      => ['required', 'in:asset,liability,equity,revenue,expense'],
-            'sub_type'  => ['nullable', 'in:current,non_current,long_term'],
+            'sub_type'  => ['nullable', 'in:main,sub,detail,current,non_current,long_term'],
             'parent_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'is_active' => ['boolean'],
         ]);
@@ -33,7 +33,7 @@ class AccountController extends Controller
             'code'      => ['required', 'string', 'max:20', "unique:accounts,code,{$account->id}"],
             'name'      => ['required', 'string', 'max:255'],
             'type'      => ['required', 'in:asset,liability,equity,revenue,expense'],
-            'sub_type'  => ['nullable', 'in:current,non_current,long_term'],
+            'sub_type'  => ['nullable', 'in:main,sub,detail,current,non_current,long_term'],
             'parent_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'is_active' => ['boolean'],
         ]);
