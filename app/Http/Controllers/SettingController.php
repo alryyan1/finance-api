@@ -16,6 +16,15 @@ class SettingController extends Controller
         'company_email',
         'company_tax_number',
         'logo_position',
+        'journal_clinic_revenue_account_id',
+        'journal_doctor_receivables_account_id',
+        'journal_doctor_fees_expense_account_id',
+    ];
+
+    private const JOURNAL_INT_KEYS = [
+        'journal_clinic_revenue_account_id',
+        'journal_doctor_receivables_account_id',
+        'journal_doctor_fees_expense_account_id',
     ];
 
     public function index(): JsonResponse
@@ -32,18 +41,27 @@ class SettingController extends Controller
         $logoRel = $all->get('company_logo', '');
         $result['company_logo'] = $logoRel ?: null;
 
+        // Cast journal account ID keys from string to int|null
+        foreach (self::JOURNAL_INT_KEYS as $k) {
+            $raw = $result[$k] ?? '';
+            $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
+        }
+
         return response()->json($result);
     }
 
     public function update(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'company_name'       => ['nullable', 'string', 'max:150'],
-            'company_address'    => ['nullable', 'string', 'max:500'],
-            'company_phone'      => ['nullable', 'string', 'max:50'],
-            'company_email'      => ['nullable', 'email',  'max:150'],
-            'company_tax_number' => ['nullable', 'string', 'max:50'],
-            'logo_position'      => ['nullable', 'string', 'in:left,right,full'],
+            'company_name'       => ['nullable', 'string',  'max:150'],
+            'company_address'    => ['nullable', 'string',  'max:500'],
+            'company_phone'      => ['nullable', 'string',  'max:50'],
+            'company_email'      => ['nullable', 'email',   'max:150'],
+            'company_tax_number' => ['nullable', 'string',  'max:50'],
+            'logo_position'      => ['nullable', 'string',  'in:left,right,full'],
+            'journal_clinic_revenue_account_id'      => ['nullable', 'integer', 'exists:accounts,id'],
+            'journal_doctor_receivables_account_id'  => ['nullable', 'integer', 'exists:accounts,id'],
+            'journal_doctor_fees_expense_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         foreach ($data as $key => $value) {

@@ -1,6 +1,9 @@
 <?php
 
 use App\Http\Controllers\Auth\LoginController;
+use App\Http\Controllers\TokenController;
+use App\Http\Controllers\UserJournalAccountController;
+use App\Http\Controllers\DoctorPartyMappingController;
 use App\Http\Controllers\AccountController;
 use App\Http\Controllers\CashVoucherController;
 use App\Http\Controllers\DashboardController;
@@ -21,6 +24,19 @@ Route::post('/login', [LoginController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [LoginController::class, 'user']);
     Route::post('/logout', [LoginController::class, 'logout']);
+
+    // Personal access tokens (used by external systems like clinic app)
+    Route::get('tokens',          [TokenController::class, 'index']);
+    Route::post('tokens',         [TokenController::class, 'store']);
+    Route::delete('tokens/{id}',  [TokenController::class, 'destroy']);
+
+    // Per-user journal account settings (identified by Bearer token owner)
+    Route::get('user/journal-accounts', [UserJournalAccountController::class, 'show']);
+    Route::put('user/journal-accounts', [UserJournalAccountController::class, 'update']);
+
+    // Global doctor → finance party mappings
+    Route::get('doctor-party-mappings',                    [DoctorPartyMappingController::class, 'index']);
+    Route::put('doctor-party-mappings/{jawda_doctor_id}',  [DoctorPartyMappingController::class, 'upsert']);
 
     Route::get('dashboard', [DashboardController::class, 'index']);
     Route::get('fiscal-years',                                    [FiscalYearController::class, 'index']);
