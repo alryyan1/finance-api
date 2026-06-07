@@ -205,47 +205,101 @@ class ReportController extends Controller
     public function incomeStatementPdf(Request $request): Response
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
-        $data = $this->incomeStatementData($from, $to);
+        $viewType = $request->input('view_type', 'columns'); // columns | statement
+        $data     = $this->incomeStatementData($from, $to);
 
-        $pdf  = PdfReport::make('قائمة الدخل', "الفترة من {$from} إلى {$to}");
-        $cols = [20, 140, 30];
+        $pdf = PdfReport::make('قائمة الدخل', "الفترة من {$from} إلى {$to}");
 
-        // Revenue section
-        $pdf->sectionHead('الإيرادات');
-        $pdf->tableHead(['الرمز', 'الحساب', 'صافي الإيراد'], $cols);
-        $odd = false;
-        foreach ($data['revenue'] as $row) {
-            $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
-            $pdf->Cell($cols[0], 7, $row['code'],          1, 0, 'C', true);
-            $pdf->Cell($cols[1], 7, $row['name'],          1, 0, 'R', true);
-            $pdf->Cell($cols[2], 7, PdfReport::n($row['net']), 1, 1, 'C', true);
-            $odd = !$odd;
+        if ($viewType === 'statement') {
+            // ── Formal statement layout: البيان | فرعي | إجمالي ──────────────
+            $cols = [120, 35, 35];
+            $pdf->tableHead(['البيان', 'فرعي', 'إجمالي'], $cols);
+
+            // Revenue
+            $pdf->sectionHead('الإيرادات');
+            $odd = false;
+            foreach ($data['revenue'] as $row) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $pdf->Cell($cols[0], 7, $row['name'],              1, 0, 'R', true);
+                $pdf->Cell($cols[1], 7, PdfReport::n($row['net']), 1, 0, 'C', true);
+                $pdf->Cell($cols[2], 7, '',                        1, 1, 'C', true);
+                $odd = !$odd;
+            }
+            // Revenue total row: empty فرعي, total in إجمالي
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->SetFillColor(235, 252, 243);
+            $pdf->Cell($cols[0], 7, 'إجمالي الإيرادات',                  1, 0, 'R', true);
+            $pdf->Cell($cols[1], 7, '',                                   1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, PdfReport::n($data['total_revenue']), 1, 1, 'C', true);
+            $pdf->SetFont('arial', '', 9);
+            $pdf->Ln(3);
+
+            // Expenses
+            $pdf->sectionHead('المصروفات (يطرح)');
+            $odd = false;
+            foreach ($data['expenses'] as $row) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $pdf->Cell($cols[0], 7, $row['name'],              1, 0, 'R', true);
+                $pdf->Cell($cols[1], 7, PdfReport::n($row['net']), 1, 0, 'C', true);
+                $pdf->Cell($cols[2], 7, '',                        1, 1, 'C', true);
+                $odd = !$odd;
+            }
+            // Expenses total row
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->SetFillColor(254, 242, 242);
+            $pdf->Cell($cols[0], 7, 'إجمالي المصروفات',                    1, 0, 'R', true);
+            $pdf->Cell($cols[1], 7, '',                                     1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, '(' . PdfReport::n($data['total_expense']) . ')', 1, 1, 'C', true);
+            $pdf->SetFont('arial', '', 9);
+            $pdf->Ln(4);
+
+            // Net profit/loss summary
+            $profit = (float) $data['net_profit'];
+            $label  = $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة';
+            $pdf->SetFont('arialbd', '', 11);
+            $pdf->SetFillColor($data['is_profit'] ? 22 : 220, $data['is_profit'] ? 163 : 38, $data['is_profit'] ? 74 : 38);
+            $pdf->SetTextColor(255, 255, 255);
+            $pdf->Cell($cols[0] + $cols[1], 10, $label,                    1, 0, 'R', true);
+            $pdf->Cell($cols[2],            10, PdfReport::n(abs($profit)), 1, 1, 'C', true);
+            $pdf->SetTextColor(0, 0, 0);
+        } else {
+            // ── Default columns layout: رمز | حساب | صافي ────────────────────
+            $cols = [20, 140, 30];
+
+            $pdf->sectionHead('الإيرادات');
+            $pdf->tableHead(['الرمز', 'الحساب', 'صافي الإيراد'], $cols);
+            $odd = false;
+            foreach ($data['revenue'] as $row) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $pdf->Cell($cols[0], 7, $row['code'],              1, 0, 'C', true);
+                $pdf->Cell($cols[1], 7, $row['name'],              1, 0, 'R', true);
+                $pdf->Cell($cols[2], 7, PdfReport::n($row['net']), 1, 1, 'C', true);
+                $odd = !$odd;
+            }
+            $pdf->totalsRow(['', 'إجمالي الإيرادات', PdfReport::n($data['total_revenue'])], $cols);
+            $pdf->Ln(4);
+
+            $pdf->sectionHead('المصروفات');
+            $pdf->tableHead(['الرمز', 'الحساب', 'صافي المصروف'], $cols);
+            $odd = false;
+            foreach ($data['expenses'] as $row) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $pdf->Cell($cols[0], 7, $row['code'],              1, 0, 'C', true);
+                $pdf->Cell($cols[1], 7, $row['name'],              1, 0, 'R', true);
+                $pdf->Cell($cols[2], 7, PdfReport::n($row['net']), 1, 1, 'C', true);
+                $odd = !$odd;
+            }
+            $pdf->totalsRow(['', 'إجمالي المصروفات', PdfReport::n($data['total_expense'])], $cols);
+            $pdf->Ln(6);
+
+            $profit = (float) $data['net_profit'];
+            $label  = $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة';
+            $pdf->SetFont('arialbd', '', 11);
+            $pdf->SetFillColor($data['is_profit'] ? 22 : 220, $data['is_profit'] ? 163 : 38, $data['is_profit'] ? 74 : 38);
+            $pdf->SetTextColor(255, 255, 255);
+            $pdf->Cell(190, 10, "{$label}: " . PdfReport::n(abs($profit)), 1, 1, 'C', true);
+            $pdf->SetTextColor(0, 0, 0);
         }
-        $pdf->totalsRow(['', 'إجمالي الإيرادات', PdfReport::n($data['total_revenue'])], $cols);
-        $pdf->Ln(4);
-
-        // Expense section
-        $pdf->sectionHead('المصروفات');
-        $pdf->tableHead(['الرمز', 'الحساب', 'صافي المصروف'], $cols);
-        $odd = false;
-        foreach ($data['expenses'] as $row) {
-            $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
-            $pdf->Cell($cols[0], 7, $row['code'],          1, 0, 'C', true);
-            $pdf->Cell($cols[1], 7, $row['name'],          1, 0, 'R', true);
-            $pdf->Cell($cols[2], 7, PdfReport::n($row['net']), 1, 1, 'C', true);
-            $odd = !$odd;
-        }
-        $pdf->totalsRow(['', 'إجمالي المصروفات', PdfReport::n($data['total_expense'])], $cols);
-        $pdf->Ln(6);
-
-        // Net profit summary box
-        $profit = (float) $data['net_profit'];
-        $label  = $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة';
-        $pdf->SetFont('arialbd', '', 11);
-        $pdf->SetFillColor($data['is_profit'] ? 22 : 220, $data['is_profit'] ? 163 : 38, $data['is_profit'] ? 74 : 38);
-        $pdf->SetTextColor(255, 255, 255);
-        $pdf->Cell(190, 10, "{$label}: " . PdfReport::n(abs($profit)), 1, 1, 'C', true);
-        $pdf->SetTextColor(0, 0, 0);
 
         return $pdf->respond('income-statement.pdf');
     }
