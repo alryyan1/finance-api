@@ -303,6 +303,27 @@ class PdfReport extends TCPDF
         $this->SetFont('arial', '', 9);
     }
 
+    /**
+     * Truncate $text so it fits within $maxMm at the current font, appending '…' if cut.
+     * Call this after SetFont() and before Cell().
+     */
+    public function fit(string $text, float $maxMm): string
+    {
+        if ($this->GetStringWidth($text) <= $maxMm) {
+            return $text;
+        }
+        $ellipsis = '…';
+        $avail    = $maxMm - $this->GetStringWidth($ellipsis);
+        $lo = 0;
+        $hi = mb_strlen($text);
+        while ($lo < $hi) {
+            $mid = (int)(($lo + $hi + 1) / 2);
+            $this->GetStringWidth(mb_substr($text, 0, $mid)) <= $avail
+                ? $lo = $mid : $hi = $mid - 1;
+        }
+        return mb_substr($text, 0, $lo) . $ellipsis;
+    }
+
     /** Totals row */
     public function totalsRow(array $values, array $widths, int $h = 7): void
     {

@@ -218,7 +218,8 @@ class JournalEntryController extends Controller
         $subtitle = implode('   |   ', $parts) ?: 'جميع القيود';
 
         $pdf  = PdfReport::make('دفتر اليومية', $subtitle);
-        $cols = [12, 22, 60, 36, 30, 15, 15];   // #, Code, Account, Party, LineDesc, Debit, Credit
+        // #, Code, Account, Party, LineDesc, Debit, Credit  — total = 190
+        $cols = [10, 18, 50, 26, 38, 24, 24];
 
         $grandDebit  = 0.0;
         $grandCredit = 0.0;
@@ -229,17 +230,17 @@ class JournalEntryController extends Controller
             $grandDebit  += $totalDebit;
             $grandCredit += $totalCredit;
 
-            // ── Entry header bar ──────────────────────────────────────────────
+            // ── Entry header bar (two halves so description can't overflow) ───
             $pdf->SetFont('arialbd', '', 9);
-            $pdf->SetFillColor(91, 33, 182);   // purple
+            $pdf->SetFillColor(91, 33, 182);
             $pdf->SetTextColor(255, 255, 255);
-            $status = $entry->is_posted ? 'مرحَّل' : 'مسودة';
-            $ref    = $entry->reference ? "  ({$entry->reference})" : '';
-            $pdf->Cell(
-                190, 7,
-                "#{$entry->id}   {$entry->date}   {$status}{$ref}   —   {$entry->description}",
-                0, 1, 'R', true
-            );
+            $statusLabel = $entry->is_posted ? 'مرحَّل' : 'مسودة';
+            $ref         = $entry->reference ? "  ({$entry->reference})" : '';
+            $meta        = "#{$entry->id}   {$entry->date}   {$statusLabel}{$ref}   —   ";
+            $metaW       = $pdf->GetStringWidth($meta);
+            $descW       = 190 - $metaW - 2;
+            $desc        = $pdf->fit($entry->description, max($descW, 20));
+            $pdf->Cell(190, 7, $meta . $desc, 0, 1, 'R', true);
             $pdf->SetTextColor(0, 0, 0);
 
             // ── Lines table ───────────────────────────────────────────────────
@@ -249,15 +250,16 @@ class JournalEntryController extends Controller
             $odd = false;
             foreach ($entry->lines as $i => $line) {
                 $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $pdf->SetFont('arial', '', 8);
                 $debit  = (float) $line->debit  > 0 ? PdfReport::n($line->debit)  : '—';
                 $credit = (float) $line->credit > 0 ? PdfReport::n($line->credit) : '—';
-                $pdf->Cell($cols[0], 6, (string) ($i + 1),              1, 0, 'C', true);
-                $pdf->Cell($cols[1], 6, $line->account->code ?? '',      1, 0, 'C', true);
-                $pdf->Cell($cols[2], 6, $line->account->name ?? '',      1, 0, 'R', true);
-                $pdf->Cell($cols[3], 6, $line->party->name  ?? '—',      1, 0, 'R', true);
-                $pdf->Cell($cols[4], 6, $line->description  ?? '',       1, 0, 'R', true);
-                $pdf->Cell($cols[5], 6, $debit,                          1, 0, 'C', true);
-                $pdf->Cell($cols[6], 6, $credit,                         1, 1, 'C', true);
+                $pdf->Cell($cols[0], 6, (string) ($i + 1),                              1, 0, 'C', true);
+                $pdf->Cell($cols[1], 6, $pdf->fit($line->account->code ?? '', $cols[1]), 1, 0, 'C', true);
+                $pdf->Cell($cols[2], 6, $pdf->fit($line->account->name ?? '', $cols[2]), 1, 0, 'R', true);
+                $pdf->Cell($cols[3], 6, $pdf->fit($line->party->name   ?? '—', $cols[3]),1, 0, 'R', true);
+                $pdf->Cell($cols[4], 6, $pdf->fit($line->description   ?? '', $cols[4]), 1, 0, 'R', true);
+                $pdf->Cell($cols[5], 6, $debit,                                          1, 0, 'C', true);
+                $pdf->Cell($cols[6], 6, $credit,                                         1, 1, 'C', true);
                 $odd = !$odd;
             }
 
