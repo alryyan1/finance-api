@@ -1,0 +1,19 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "php",
+            "args": [
+                "artisan",
+                "boost:mcp"
+            ]
+        },
+        "firebase": {
+            "command": "firebase",
+            "args": [
+                "mcp",
+                "--dir",
+                "C:\\xampp\\htdocs\\finance-firebase-functions"
+            ]
+        }
+    }
+}

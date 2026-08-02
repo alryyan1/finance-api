@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(timeout 15 npm run dev -- --port 5185)",
+      "Bash(timeout 15 npm run dev -- --port 5186)",
+      "Bash(node -e ' *)",
+      "Bash(timeout 15 npm run dev -- --port 5187)",
+      "Bash(timeout 15 npm run dev -- --port 5188)",
+      "mcp__firebase__firebase_get_environment",
+      "mcp__firebase__firebase_get_security_rules",
+      "mcp__firebase__functions_get_logs",
+      "Bash(curl -s -w '\\\\nHTTP_STATUS:%{http_code}\\\\n' -X POST https://us-central1-sales-9e9b8.cloudfunctions.net/pettyCashWebhook -H 'Content-Type: application/json' -d '{ *)",
+      "Bash(chromium-cli --help)",
+      "mcp__firebase__firestore_get_document",
+      "mcp__firebase__firebase_deploy",
+      "mcp__firebase__firebase_deploy_status",
+      "Bash(firebase --version)",
+      "Bash(firebase projects:list)",
+      "Bash(firebase deploy *)",
+      "Bash(firebase functions:list)"
+    ]
+  }
+}

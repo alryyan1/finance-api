@@ -9,14 +9,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class PettyCashFund extends Model
 {
     protected $fillable = [
-        'name', 'custodian_name', 'account_id', 'bank_account_id',
-        'max_amount', 'current_balance', 'low_balance_threshold', 'status',
+        'name', 'custodian_name', 'account_id', 'max_amount',
+        'low_balance_threshold', 'current_balance', 'status',
     ];
 
     protected $casts = [
-        'max_amount'            => 'decimal:2',
-        'current_balance'       => 'decimal:2',
+        'max_amount' => 'decimal:2',
         'low_balance_threshold' => 'decimal:2',
+        'current_balance' => 'decimal:2',
     ];
 
     public function account(): BelongsTo
@@ -24,23 +24,8 @@ class PettyCashFund extends Model
         return $this->belongsTo(Account::class);
     }
 
-    public function bankAccount(): BelongsTo
+    public function transactions(): HasMany
     {
-        return $this->belongsTo(Account::class, 'bank_account_id');
-    }
-
-    public function requests(): HasMany
-    {
-        return $this->hasMany(PettyCashRequest::class, 'fund_id');
-    }
-
-    public function replenishments(): HasMany
-    {
-        return $this->hasMany(PettyCashReplenishment::class, 'fund_id');
-    }
-
-    public function isLowBalance(): bool
-    {
-        return (float) $this->current_balance <= (float) $this->low_balance_threshold;
+        return $this->hasMany(PettyCashTransaction::class, 'fund_id');
     }
 }

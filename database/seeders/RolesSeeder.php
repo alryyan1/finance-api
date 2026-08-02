@@ -3,14 +3,15 @@
 namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
+use Spatie\Permission\PermissionRegistrar;
 
 class RolesSeeder extends Seeder
 {
     public function run(): void
     {
-        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
+        app()[PermissionRegistrar::class]->forgetCachedPermissions();
 
         // Permissions
         $permissions = [
@@ -20,8 +21,6 @@ class RolesSeeder extends Seeder
             'transactions.view', 'transactions.create', 'transactions.edit', 'transactions.delete', 'transactions.post',
             // Cash vouchers
             'cash-vouchers.view', 'cash-vouchers.create', 'cash-vouchers.delete',
-            // Petty cash
-            'petty-cash.view', 'petty-cash.manage', 'petty-cash.approve',
             // Parties
             'parties.view', 'parties.create', 'parties.edit', 'parties.delete',
             // Reports
@@ -47,7 +46,6 @@ class RolesSeeder extends Seeder
             'accounts.view', 'accounts.create', 'accounts.edit',
             'transactions.view', 'transactions.create', 'transactions.edit', 'transactions.post',
             'cash-vouchers.view', 'cash-vouchers.create',
-            'petty-cash.view', 'petty-cash.manage',
             'parties.view', 'parties.create', 'parties.edit',
             'reports.view',
         ]);
@@ -57,7 +55,6 @@ class RolesSeeder extends Seeder
             'accounts.view',
             'transactions.view',
             'cash-vouchers.view',
-            'petty-cash.view',
             'parties.view',
             'reports.view',
         ]);

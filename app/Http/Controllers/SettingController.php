@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Setting;
+use App\Services\FirestoreApprovalService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class SettingController extends Controller
@@ -19,12 +21,24 @@ class SettingController extends Controller
         'journal_clinic_revenue_account_id',
         'journal_doctor_receivables_account_id',
         'journal_doctor_fees_expense_account_id',
+        'petty_cash_manager_user_id',
+        'petty_cash_auditor_user_id',
+        'petty_cash_manager_whatsapp_phone',
+        'petty_cash_auditor_whatsapp_phone',
+        'petty_cash_notify_on_create',
+        'petty_cash_notify_recipients',
+        'firebase_collection_name',
     ];
 
     private const JOURNAL_INT_KEYS = [
         'journal_clinic_revenue_account_id',
         'journal_doctor_receivables_account_id',
         'journal_doctor_fees_expense_account_id',
+    ];
+
+    private const PETTY_CASH_INT_KEYS = [
+        'petty_cash_manager_user_id',
+        'petty_cash_auditor_user_id',
     ];
 
     public function index(): JsonResponse
@@ -47,28 +61,61 @@ class SettingController extends Controller
             $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
         }
 
+        // Cast petty cash manager/auditor user ID keys from string to int|null
+        foreach (self::PETTY_CASH_INT_KEYS as $k) {
+            $raw = $result[$k] ?? '';
+            $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
+        }
+
+        // Notify-on-create defaults to enabled, and recipients to "both", so
+        // installs that predate these settings keep the original always-send behavior.
+        $result['petty_cash_notify_on_create'] = $result['petty_cash_notify_on_create'] === ''
+            ? true
+            : filter_var($result['petty_cash_notify_on_create'], FILTER_VALIDATE_BOOLEAN);
+        $result['petty_cash_notify_recipients'] = $result['petty_cash_notify_recipients'] ?: 'both';
+
         return response()->json($result);
     }
 
-    public function update(Request $request): JsonResponse
+    public function update(Request $request, FirestoreApprovalService $firestore): JsonResponse
     {
         $data = $request->validate([
-            'company_name'       => ['nullable', 'string',  'max:150'],
-            'company_address'    => ['nullable', 'string',  'max:500'],
-            'company_phone'      => ['nullable', 'string',  'max:50'],
-            'company_email'      => ['nullable', 'email',   'max:150'],
+            'company_name' => ['nullable', 'string',  'max:150'],
+            'company_address' => ['nullable', 'string',  'max:500'],
+            'company_phone' => ['nullable', 'string',  'max:50'],
+            'company_email' => ['nullable', 'email',   'max:150'],
             'company_tax_number' => ['nullable', 'string',  'max:50'],
-            'logo_position'      => ['nullable', 'string',  'in:left,right,full'],
-            'journal_clinic_revenue_account_id'      => ['nullable', 'integer', 'exists:accounts,id'],
-            'journal_doctor_receivables_account_id'  => ['nullable', 'integer', 'exists:accounts,id'],
+            'logo_position' => ['nullable', 'string',  'in:left,right,full'],
+            'journal_clinic_revenue_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'journal_doctor_receivables_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'journal_doctor_fees_expense_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'petty_cash_manager_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'petty_cash_auditor_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'petty_cash_manager_whatsapp_phone' => ['nullable', 'string', 'max:20'],
+            'petty_cash_auditor_whatsapp_phone' => ['nullable', 'string', 'max:20'],
+            'petty_cash_notify_on_create' => ['nullable', 'boolean'],
+            'petty_cash_notify_recipients' => ['nullable', 'in:manager,auditor,both'],
+            'firebase_collection_name' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
         ]);
 
         foreach ($data as $key => $value) {
+            if (is_bool($value)) {
+                $value = $value ? '1' : '0';
+            }
+
             Setting::updateOrCreate(
-                ['key'   => $key],
+                ['key' => $key],
                 ['value' => $value ?? '']
             );
+        }
+
+        $whatsappKeys = ['petty_cash_manager_whatsapp_phone', 'petty_cash_auditor_whatsapp_phone', 'firebase_collection_name'];
+        if (array_intersect($whatsappKeys, array_keys($data)) !== []) {
+            try {
+                $firestore->syncWhatsAppSenderConfig();
+            } catch (\Throwable $e) {
+                Log::error('Failed to sync WhatsApp sender config to Firestore', ['error' => $e->getMessage()]);
+            }
         }
 
         return $this->index();
@@ -102,7 +149,7 @@ class SettingController extends Controller
     public function deleteLogo(): JsonResponse
     {
         $setting = Setting::where('key', 'company_logo')->first();
-        $rel     = (string) ($setting?->value ?? '');
+        $rel = (string) ($setting?->value ?? '');
         if ($rel) {
             Storage::disk('public')->delete($rel);
             $setting?->update(['value' => '']);
