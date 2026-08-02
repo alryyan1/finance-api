@@ -79,16 +79,16 @@ class FirestoreApprovalService
     }
 
     /**
-     * Mirrors the configured manager/auditor WhatsApp numbers — and which
-     * finance/{collectionName} each belongs to — into a top-level lookup the
-     * pettyCashWebhook Cloud Function reads when it receives a bare image/PDF
-     * (not a button tap): it authorizes who may attach a receipt via chat, and
-     * tells the function which collection to list pending expenses from for
-     * that phone. Called whenever petty cash approval settings are saved.
+     * Mirrors the configured manager/auditor WhatsApp numbers into
+     * finance/{collectionName}/whatsapp_petty_cash_senders — the
+     * pettyCashWebhook Cloud Function reads this when it receives a bare
+     * image/PDF (not a button tap) to authorize who may attach a receipt via
+     * chat. collectionName itself is resolved by the Cloud Function from the
+     * business phone_number_id, not from this doc — this only gates role
+     * (manager/auditor). Called whenever petty cash approval settings are saved.
      */
     public function syncWhatsAppSenderConfig(): void
     {
-        $collectionName = $this->collectionName();
         $managerPhone = (string) Setting::where('key', 'petty_cash_manager_whatsapp_phone')->value('value');
         $auditorPhone = (string) Setting::where('key', 'petty_cash_auditor_whatsapp_phone')->value('value');
 
@@ -99,7 +99,6 @@ class FirestoreApprovalService
             }
 
             $this->patch($this->senderConfigPath($normalized), [
-                'collection_name' => $collectionName,
                 'role' => $role,
             ]);
         }
@@ -254,7 +253,7 @@ class FirestoreApprovalService
     {
         $projectId = config('services.firebase.project_id');
 
-        return "projects/{$projectId}/databases/(default)/documents/whatsapp_petty_cash_senders/{$normalizedPhone}";
+        return "projects/{$projectId}/databases/(default)/documents/finance/{$this->collectionName()}/whatsapp_petty_cash_senders/{$normalizedPhone}";
     }
 
     private function expenseAccountsPath(): string
