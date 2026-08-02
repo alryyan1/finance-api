@@ -261,7 +261,7 @@ class FirestoreApprovalService
     {
         $projectId = config('services.firebase.project_id');
 
-        return "projects/{$projectId}/databases/(default)/documents/whatsapp_expense_accounts/{$this->collectionName()}";
+        return "projects/{$projectId}/databases/(default)/documents/finance/{$this->collectionName()}/whatsapp_expense_accounts/config";
     }
 
     /**

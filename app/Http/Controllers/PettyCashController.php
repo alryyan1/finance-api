@@ -99,6 +99,14 @@ class PettyCashController extends Controller
         return response()->json($transactions);
     }
 
+    /** POST /petty-cash/sync-expense-accounts — re-push the active expense account list to Firestore for the WhatsApp "new expense" flow. */
+    public function syncExpenseAccounts(FirestoreApprovalService $firestore): JsonResponse
+    {
+        $firestore->syncExpenseAccounts();
+
+        return response()->json(['message' => 'تم مزامنة قائمة الحسابات مع واتساب.']);
+    }
+
     public function transactionsPdf(Request $request): Response
     {
         $request->validate([

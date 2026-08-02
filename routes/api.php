@@ -74,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/manager', [PettyCashController::class, 'approveByManager']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/reconcile', [PettyCashController::class, 'reconcile']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/notify', [PettyCashController::class, 'sendNotification']);
+    Route::post('petty-cash/sync-expense-accounts', [PettyCashController::class, 'syncExpenseAccounts']);
 
     Route::get('whatsapp/phone-number', [WhatsAppController::class, 'phoneNumber']);
 
