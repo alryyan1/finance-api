@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('petty_cash_transactions', 'document_firebase_url')) {
+            return;
+        }
+
         Schema::table('petty_cash_transactions', function (Blueprint $table) {
             // The Firebase Storage download URL Laravel last synced document_path from —
             // lets reconcileFromFirestore() detect a receipt attached/replaced via the

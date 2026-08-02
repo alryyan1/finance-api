@@ -168,6 +168,27 @@ class WhatsAppService
             ])->throw();
     }
 
+    /**
+     * A plain free-form text message — only deliverable within the 24-hour
+     * customer service window (i.e. in reply to something the recipient sent
+     * recently), so this is for confirming/rejecting a WhatsApp-originated
+     * action back to whoever just triggered it, not for cold outreach.
+     */
+    public function sendText(string $toPhone, string $body): void
+    {
+        Http::withToken(config('services.whatsapp.token'))
+            ->post(sprintf(
+                'https://graph.facebook.com/%s/%s/messages',
+                config('services.whatsapp.api_version', 'v20.0'),
+                config('services.whatsapp.phone_number_id')
+            ), [
+                'messaging_product' => 'whatsapp',
+                'to' => $toPhone,
+                'type' => 'text',
+                'text' => ['body' => $body],
+            ])->throw();
+    }
+
     private function collectionName(): string
     {
         return Setting::where('key', 'firebase_collection_name')->value('value') ?: 'jawda';

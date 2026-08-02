@@ -2,7 +2,10 @@
 
 namespace App\Services;
 
+use App\Models\Account;
+use App\Models\FiscalYear;
 use App\Models\JournalEntry;
+use App\Models\PettyCashFund;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +16,10 @@ use Illuminate\Support\Str;
 
 class PettyCashApprovalService
 {
-    public function __construct(private readonly FirestoreApprovalService $firestore) {}
+    public function __construct(
+        private readonly FirestoreApprovalService $firestore,
+        private readonly WhatsAppService $whatsapp,
+    ) {}
 
     /**
      * Record one approval (auditor or manager) for a pending petty cash expense.
@@ -153,6 +159,102 @@ class PettyCashApprovalService
             ]);
 
             return $transaction;
+        }
+    }
+
+    /**
+     * Imports "new expense" requests submitted through the WhatsApp Flow
+     * (petty_cash_new_expense_request, triggered by texting "إذن جديد") as
+     * real, pending petty cash transactions — the same effect as submitting
+     * the in-app "مصروف جديد" form, including the usual approval
+     * notifications. Runs automatically whenever the transactions list loads.
+     * Best-effort per request: one that fails validation is dropped (its
+     * Firestore doc removed) and the submitter is told why over WhatsApp,
+     * rather than blocking every subsequent list load retrying it forever.
+     */
+    public function importPendingWhatsAppRequests(): void
+    {
+        foreach ($this->firestore->fetchPendingWhatsAppRequests() as $request) {
+            $this->importOneWhatsAppRequest($request);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>  $request
+     */
+    private function importOneWhatsAppRequest(array $request): void
+    {
+        $requestId = (string) ($request['id'] ?? '');
+        $phone = (string) ($request['submitted_by_phone'] ?? '');
+
+        try {
+            $fund = PettyCashFund::first();
+            if (! $fund || $fund->status !== 'active') {
+                throw new \RuntimeException('صندوق النثريات غير مُفعّل.');
+            }
+
+            $amount = (float) ($request['amount'] ?? 0);
+            if ($amount <= 0) {
+                throw new \RuntimeException('المبلغ غير صالح.');
+            }
+            if ($amount > (float) $fund->current_balance) {
+                throw new \RuntimeException('رصيد الصندوق غير كافٍ لتغطية هذا المصروف.');
+            }
+
+            $contraAccount = Account::where('id', (int) ($request['contra_account_id'] ?? 0))
+                ->where('type', 'expense')
+                ->first();
+            if (! $contraAccount) {
+                throw new \RuntimeException('حساب المصروف غير صالح.');
+            }
+
+            $date = now()->toDateString();
+            if (FiscalYear::isDateLocked($date)) {
+                throw new \RuntimeException('الفترة المالية الحالية مغلقة.');
+            }
+
+            $transaction = PettyCashTransaction::create([
+                'fund_id' => $fund->id,
+                'type' => 'expense',
+                'status' => 'pending',
+                'date' => $date,
+                'amount' => $amount,
+                'beneficiary_name' => ($request['beneficiary_name'] ?? null) ?: null,
+                'contra_account_id' => $contraAccount->id,
+                'description' => ($request['description'] ?? null) ?: null,
+                'journal_entry_id' => null,
+            ]);
+
+            $this->firestore->createMirror($transaction);
+            $this->whatsapp->sendApprovalNotifications($transaction);
+
+            if ($phone !== '') {
+                $this->whatsapp->sendText($phone, "تم إنشاء طلب الصرف رقم #{$transaction->id} بمبلغ ".number_format($amount, 2).' بانتظار اعتماد المراجع والمدير.');
+            }
+        } catch (\Throwable $e) {
+            Log::error('Failed to import WhatsApp petty cash request', [
+                'request_id' => $requestId,
+                'error' => $e->getMessage(),
+            ]);
+
+            if ($phone !== '') {
+                try {
+                    $this->whatsapp->sendText($phone, 'تعذّر إنشاء طلب الصرف: '.$e->getMessage());
+                } catch (\Throwable) {
+                    // best-effort
+                }
+            }
+        } finally {
+            if ($requestId !== '') {
+                try {
+                    $this->firestore->deletePendingWhatsAppRequest($requestId);
+                } catch (\Throwable $e) {
+                    Log::error('Failed to delete imported WhatsApp petty cash request from Firestore', [
+                        'request_id' => $requestId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         }
     }
 

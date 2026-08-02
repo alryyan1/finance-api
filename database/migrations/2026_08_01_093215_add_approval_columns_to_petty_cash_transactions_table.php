@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasColumn('petty_cash_transactions', 'status')) {
+            return;
+        }
+
         Schema::table('petty_cash_transactions', function (Blueprint $table) {
             $table->enum('status', ['pending', 'approved'])->default('approved')->after('type');
             $table->timestamp('auditor_approved_at')->nullable()->after('description');

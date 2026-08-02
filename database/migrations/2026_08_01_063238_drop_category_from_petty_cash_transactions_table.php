@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (! Schema::hasColumn('petty_cash_transactions', 'category')) {
+            return;
+        }
+
         Schema::table('petty_cash_transactions', function (Blueprint $table) {
             $table->dropColumn('category');
         });

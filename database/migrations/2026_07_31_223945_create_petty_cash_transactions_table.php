@@ -11,6 +11,10 @@ return new class extends Migration
      */
     public function up(): void
     {
+        if (Schema::hasTable('petty_cash_transactions')) {
+            return;
+        }
+
         Schema::create('petty_cash_transactions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('fund_id')->constrained('petty_cash_funds');

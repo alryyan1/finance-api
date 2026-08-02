@@ -17,7 +17,13 @@
       "Bash(firebase --version)",
       "Bash(firebase projects:list)",
       "Bash(firebase deploy *)",
-      "Bash(firebase functions:list)"
+      "Bash(firebase functions:list)",
+      "Bash(git init *)",
+      "Bash(git branch *)",
+      "Bash(git remote *)",
+      "Bash(node --check index.js)",
+      "mcp__firebase__firestore_list_documents",
+      "mcp__firebase__firestore_delete_document"
     ]
   }
 }

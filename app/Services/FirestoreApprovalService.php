@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Account;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\ClientException;
+use Illuminate\Support\Str;
 use Kreait\Firebase\Factory;
 
 /**
@@ -86,7 +88,7 @@ class FirestoreApprovalService
      */
     public function syncWhatsAppSenderConfig(): void
     {
-        $collectionName = Setting::where('key', 'firebase_collection_name')->value('value') ?: 'jawda';
+        $collectionName = $this->collectionName();
         $managerPhone = (string) Setting::where('key', 'petty_cash_manager_whatsapp_phone')->value('value');
         $auditorPhone = (string) Setting::where('key', 'petty_cash_auditor_whatsapp_phone')->value('value');
 
@@ -101,6 +103,79 @@ class FirestoreApprovalService
                 'role' => $role,
             ]);
         }
+    }
+
+    /**
+     * Mirrors active expense accounts into Firestore as a single JSON-encoded
+     * field — read by the pettyCashWebhook Cloud Function to populate the
+     * "حساب المصروف" dropdown on the "new expense" WhatsApp Flow with real
+     * accounts, without needing a Data Exchange (encrypted) flow endpoint.
+     * Called whenever accounts are created, updated, or deleted.
+     */
+    public function syncExpenseAccounts(): void
+    {
+        $accounts = Account::where('type', 'expense')
+            ->where('is_active', true)
+            ->orderBy('code')
+            ->get(['id', 'code', 'name'])
+            ->map(fn (Account $a) => ['id' => (string) $a->id, 'title' => "{$a->code} — {$a->name}"])
+            ->values()
+            ->all();
+
+        $this->patch($this->expenseAccountsPath(), [
+            'accounts_json' => json_encode($accounts),
+        ]);
+    }
+
+    /**
+     * Reads back the "new expense" requests submitted through the WhatsApp Flow
+     * (petty_cash_new_expense_request) — written by the Cloud Function under
+     * finance/{collectionName}/whatsapp_new_requests, one doc per submission.
+     * Returns [] when Firebase isn't configured or none are pending.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchPendingWhatsAppRequests(): array
+    {
+        $client = $this->client();
+        if (! $client) {
+            return [];
+        }
+
+        $projectId = config('services.firebase.project_id');
+        $collectionName = $this->collectionName();
+        $url = self::BASE_URL."/projects/{$projectId}/databases/(default)/documents/finance/{$collectionName}/whatsapp_new_requests";
+
+        try {
+            $response = $client->get($url);
+        } catch (ClientException $e) {
+            if ($e->getResponse()?->getStatusCode() === 404) {
+                return [];
+            }
+
+            throw $e;
+        }
+
+        $body = json_decode((string) $response->getBody(), true);
+        $documents = $body['documents'] ?? [];
+
+        return collect($documents)->map(fn (array $doc) => [
+            'id' => Str::afterLast($doc['name'], '/'),
+            ...$this->decodeFields($doc['fields'] ?? []),
+        ])->all();
+    }
+
+    /** Removes a WhatsApp "new expense" request doc once it's been imported (or discarded as invalid). */
+    public function deletePendingWhatsAppRequest(string $requestId): void
+    {
+        $client = $this->client();
+        if (! $client) {
+            return;
+        }
+
+        $projectId = config('services.firebase.project_id');
+        $collectionName = $this->collectionName();
+        $client->delete(self::BASE_URL."/projects/{$projectId}/databases/(default)/documents/finance/{$collectionName}/whatsapp_new_requests/{$requestId}");
     }
 
     public function delete(int $transactionId): void
@@ -170,10 +245,9 @@ class FirestoreApprovalService
      */
     private function documentPath(string $transactionId): string
     {
-        $collectionName = Setting::where('key', 'firebase_collection_name')->value('value') ?: 'jawda';
         $projectId = config('services.firebase.project_id');
 
-        return "projects/{$projectId}/databases/(default)/documents/finance/{$collectionName}/petty_cash_approvals/{$transactionId}";
+        return "projects/{$projectId}/databases/(default)/documents/finance/{$this->collectionName()}/petty_cash_approvals/{$transactionId}";
     }
 
     private function senderConfigPath(string $normalizedPhone): string
@@ -181,6 +255,22 @@ class FirestoreApprovalService
         $projectId = config('services.firebase.project_id');
 
         return "projects/{$projectId}/databases/(default)/documents/whatsapp_petty_cash_senders/{$normalizedPhone}";
+    }
+
+    private function expenseAccountsPath(): string
+    {
+        $projectId = config('services.firebase.project_id');
+
+        return "projects/{$projectId}/databases/(default)/documents/whatsapp_expense_accounts/{$this->collectionName()}";
+    }
+
+    /**
+     * The tenant identifier set in Settings > Petty Cash — falls back to "jawda"
+     * so an unconfigured value still lands somewhere sane.
+     */
+    private function collectionName(): string
+    {
+        return Setting::where('key', 'firebase_collection_name')->value('value') ?: 'jawda';
     }
 
     /**

@@ -59,6 +59,15 @@ class PettyCashController extends Controller
             'to' => ['nullable', 'date'],
         ]);
 
+        // Import any "new expense" requests submitted via the WhatsApp Flow ("إذن
+        // جديد") since the last time this list loaded — best-effort, so it never
+        // breaks the list itself.
+        try {
+            $approval->importPendingWhatsAppRequests();
+        } catch (\Throwable $e) {
+            Log::error('Failed to import pending WhatsApp petty cash requests', ['error' => $e->getMessage()]);
+        }
+
         $transactions = PettyCashTransaction::with(['contraAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))

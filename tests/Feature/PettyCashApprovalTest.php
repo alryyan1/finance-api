@@ -242,6 +242,56 @@ class PettyCashApprovalTest extends TestCase
         Http::assertSentCount(1);
     }
 
+    public function test_loading_transactions_imports_a_pending_whatsapp_new_expense_request(): void
+    {
+        $this->mock(FirestoreApprovalService::class, function ($mock) {
+            $mock->shouldReceive('fetchPendingWhatsAppRequests')->once()->andReturn([
+                [
+                    'id' => 'req-1',
+                    'amount' => 75.5,
+                    'beneficiary_name' => 'Ahmed',
+                    'contra_account_id' => (string) $this->expenseAccount->id,
+                    'description' => 'Taxi fare',
+                    'submitted_by_phone' => '',
+                ],
+            ]);
+            $mock->shouldReceive('createMirror')->once();
+            $mock->shouldReceive('deletePendingWhatsAppRequest')->once()->with('req-1');
+            $mock->shouldReceive('fetch')->andReturn(null);
+        });
+
+        $response = $this->actingAs($this->other)->getJson('/api/petty-cash/transactions');
+
+        $response->assertOk();
+
+        $created = PettyCashTransaction::where('description', 'Taxi fare')->first();
+        $this->assertNotNull($created);
+        $this->assertSame('pending', $created->status);
+        $this->assertSame('75.50', $created->amount);
+        $this->assertSame('Ahmed', $created->beneficiary_name);
+        $this->assertSame($this->expenseAccount->id, $created->contra_account_id);
+    }
+
+    public function test_invalid_whatsapp_new_expense_request_is_dropped_without_creating_a_transaction(): void
+    {
+        $this->mock(FirestoreApprovalService::class, function ($mock) {
+            $mock->shouldReceive('fetchPendingWhatsAppRequests')->once()->andReturn([
+                [
+                    'id' => 'req-bad',
+                    'amount' => 0,
+                    'contra_account_id' => (string) $this->expenseAccount->id,
+                    'submitted_by_phone' => '',
+                ],
+            ]);
+            $mock->shouldReceive('deletePendingWhatsAppRequest')->once()->with('req-bad');
+            $mock->shouldReceive('fetch')->andReturn(null);
+        });
+
+        $this->actingAs($this->other)->getJson('/api/petty-cash/transactions')->assertOk();
+
+        $this->assertSame(0, PettyCashTransaction::count());
+    }
+
     public function test_wrong_user_cannot_approve(): void
     {
         $txn = $this->createPendingExpense();
