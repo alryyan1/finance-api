@@ -24,6 +24,8 @@ class PettyCashApprovalTest extends TestCase
 
     private Account $fundAccount;
 
+    private Account $fundAccount2;
+
     private Account $expenseAccount;
 
     private Account $expenseAccount2;
@@ -38,6 +40,7 @@ class PettyCashApprovalTest extends TestCase
         Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $this->manager->id]);
 
         $this->fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
+        $this->fundAccount2 = Account::create(['code' => '102', 'name' => 'Petty Cash Vault', 'type' => 'asset', 'is_active' => true]);
         $this->expenseAccount = Account::create(['code' => '501', 'name' => 'Office Supplies', 'type' => 'expense', 'is_active' => true]);
         $this->expenseAccount2 = Account::create(['code' => '502', 'name' => 'Transportation', 'type' => 'expense', 'is_active' => true]);
 
@@ -134,6 +137,67 @@ class PettyCashApprovalTest extends TestCase
         $this->assertSame('30.00', $entry->lines()->where('account_id', $this->expenseAccount->id)->value('debit'));
         $this->assertSame('20.00', $entry->lines()->where('account_id', $this->expenseAccount2->id)->value('debit'));
         $this->assertSame('50.00', $entry->lines()->where('account_id', $this->fundAccount->id)->value('credit'));
+    }
+
+    public function test_compound_credit_expense_leaves_source_account_null(): void
+    {
+        $response = $this->actingAs($this->other)->postJson('/api/petty-cash/expenses', [
+            'date' => now()->toDateString(),
+            'amount' => 50,
+            'contra_account_id' => $this->expenseAccount->id,
+            'description' => 'Split funding',
+            'credit_lines' => [
+                ['source_account_id' => $this->fundAccount->id, 'amount' => 30],
+                ['source_account_id' => $this->fundAccount2->id, 'amount' => 20],
+            ],
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('source_account_id', null);
+        $response->assertJsonCount(2, 'credit_lines');
+    }
+
+    public function test_compound_credit_expense_rejects_mismatched_total(): void
+    {
+        $response = $this->actingAs($this->other)->postJson('/api/petty-cash/expenses', [
+            'date' => now()->toDateString(),
+            'amount' => 50,
+            'contra_account_id' => $this->expenseAccount->id,
+            'credit_lines' => [
+                ['source_account_id' => $this->fundAccount->id, 'amount' => 30],
+                ['source_account_id' => $this->fundAccount2->id, 'amount' => 10],
+            ],
+        ]);
+
+        $response->assertStatus(422);
+        $this->assertSame(0, PettyCashTransaction::count());
+    }
+
+    public function test_compound_credit_expense_approval_posts_a_balanced_multi_line_journal_entry(): void
+    {
+        $response = $this->actingAs($this->other)->postJson('/api/petty-cash/expenses', [
+            'date' => now()->toDateString(),
+            'amount' => 50,
+            'contra_account_id' => $this->expenseAccount->id,
+            'description' => 'Split funding',
+            'credit_lines' => [
+                ['source_account_id' => $this->fundAccount->id, 'amount' => 30],
+                ['source_account_id' => $this->fundAccount2->id, 'amount' => 20],
+            ],
+        ]);
+        $txnId = $response->json('id');
+
+        $this->actingAs($this->manager)
+            ->postJson("/api/petty-cash/transactions/{$txnId}/approve/manager")
+            ->assertOk();
+
+        $txn = PettyCashTransaction::find($txnId);
+        $entry = JournalEntry::find($txn->journal_entry_id);
+
+        $this->assertCount(3, $entry->lines);
+        $this->assertSame('50.00', $entry->lines()->where('account_id', $this->expenseAccount->id)->value('debit'));
+        $this->assertSame('30.00', $entry->lines()->where('account_id', $this->fundAccount->id)->value('credit'));
+        $this->assertSame('20.00', $entry->lines()->where('account_id', $this->fundAccount2->id)->value('credit'));
     }
 
     public function test_reconcile_endpoint_applies_manager_approval_from_firestore(): void

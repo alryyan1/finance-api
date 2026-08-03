@@ -40,6 +40,11 @@ class PettyCashTransaction extends Model
         return $this->hasMany(PettyCashTransactionLine::class);
     }
 
+    public function creditLines(): HasMany
+    {
+        return $this->hasMany(PettyCashTransactionSourceLine::class);
+    }
+
     public function journalEntry(): BelongsTo
     {
         return $this->belongsTo(JournalEntry::class);

@@ -35,7 +35,7 @@ class PettyCashApprovalService
             $transaction = PettyCashTransaction::whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
             if ($transaction->manager_approved_at !== null) {
-                return $transaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'managerApprovedBy:id,name']);
+                return $transaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
             }
 
             $transaction->update(['manager_approved_at' => now(), 'manager_approved_by_user_id' => $approverUserId]);
@@ -44,7 +44,7 @@ class PettyCashApprovalService
             $transaction->refresh();
             $this->postJournalEntry($transaction);
 
-            return $transaction->fresh(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'managerApprovedBy:id,name']);
+            return $transaction->fresh(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
         });
 
         // Firestore is a best-effort mirror, not the source of truth — never let it
@@ -248,7 +248,7 @@ class PettyCashApprovalService
             'is_posted' => true,
         ]);
 
-        $transaction->loadMissing('lines');
+        $transaction->loadMissing(['lines', 'creditLines']);
 
         $debitLines = $transaction->lines->isNotEmpty()
             ? $transaction->lines->map(fn ($line) => [
@@ -264,15 +264,21 @@ class PettyCashApprovalService
                 'description' => $desc,
             ]];
 
-        $entry->lines()->createMany([
-            ...$debitLines,
-            [
+        $creditLines = $transaction->creditLines->isNotEmpty()
+            ? $transaction->creditLines->map(fn ($line) => [
+                'account_id' => $line->source_account_id,
+                'debit' => 0,
+                'credit' => $line->amount,
+                'description' => $desc,
+            ])->all()
+            : [[
                 'account_id' => $transaction->source_account_id,
                 'debit' => 0,
                 'credit' => $transaction->amount,
                 'description' => $desc,
-            ],
-        ]);
+            ]];
+
+        $entry->lines()->createMany([...$debitLines, ...$creditLines]);
 
         $transaction->update(['journal_entry_id' => $entry->id, 'status' => 'approved']);
     }
