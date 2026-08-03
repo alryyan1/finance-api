@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class PettyCashTransaction extends Model
 {
@@ -32,6 +33,11 @@ class PettyCashTransaction extends Model
     public function contraAccount(): BelongsTo
     {
         return $this->belongsTo(Account::class, 'contra_account_id');
+    }
+
+    public function lines(): HasMany
+    {
+        return $this->hasMany(PettyCashTransactionLine::class);
     }
 
     public function journalEntry(): BelongsTo

@@ -64,6 +64,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/statement-of-equity/pdf', [ReportController::class, 'statementOfEquityPdf']);
     Route::get('petty-cash/transactions', [PettyCashController::class, 'transactions']);
     Route::get('petty-cash/transactions/pdf', [PettyCashController::class, 'transactionsPdf']);
+    Route::get('petty-cash/transactions/excel', [PettyCashController::class, 'transactionsExcel']);
     Route::post('petty-cash/expenses', [PettyCashController::class, 'storeExpense']);
     Route::delete('petty-cash/transactions/{pettyCashTransaction}', [PettyCashController::class, 'destroy']);
     Route::get('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'document']);

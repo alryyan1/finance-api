@@ -17,7 +17,12 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PettyCashController extends Controller
 {
@@ -33,14 +38,16 @@ class PettyCashController extends Controller
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
             'search' => ['nullable', 'string', 'max:255'],
+            'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
-        $query = PettyCashTransaction::with(['contraAccount:id,code,name', 'sourceAccount:id,code,name', 'createdBy:id,name'])
+        $query = PettyCashTransaction::with(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'createdBy:id,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
+            ->when($request->source_account_id, fn ($q) => $q->where('source_account_id', $request->source_account_id))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $term = trim((string) $request->string('search'));
                 $q->where(function ($q) use ($term) {
@@ -54,7 +61,14 @@ class PettyCashController extends Controller
             ->orderByDesc('id');
 
         if ($request->filled('per_page')) {
-            return response()->json($query->paginate($request->integer('per_page'))->withQueryString());
+            $expenseTotal = (clone $query)->reorder()->where('type', 'expense')->sum('amount');
+
+            return response()->json([
+                ...$query->paginate($request->integer('per_page'))->withQueryString()->toArray(),
+                'totals' => [
+                    'expense' => (float) $expenseTotal,
+                ],
+            ]);
         }
 
         return response()->json($query->get());
@@ -128,12 +142,14 @@ class PettyCashController extends Controller
             'type' => ['nullable', 'in:expense,replenishment'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
+            'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
-        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'sourceAccount:id,code,name'])
+        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
+            ->when($request->source_account_id, fn ($q) => $q->where('source_account_id', $request->source_account_id))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
@@ -168,7 +184,7 @@ class PettyCashController extends Controller
             $pdf->Cell($cols[0], 7, $typeLabels[$t->type], 1, 0, 'C', true);
             $pdf->Cell($cols[1], 7, $t->date->format('Y-m-d'), 1, 0, 'C', true);
             $pdf->Cell($cols[2], 7, $pdf->fit($t->beneficiary_name ?? '—', $cols[2] - 2), 1, 0, 'R', true);
-            $pdf->Cell($cols[3], 7, $pdf->fit($t->contraAccount->name, $cols[3] - 2), 1, 0, 'R', true);
+            $pdf->Cell($cols[3], 7, $pdf->fit($this->contraAccountLabel($t), $cols[3] - 2), 1, 0, 'R', true);
             $pdf->Cell($cols[4], 7, $pdf->fit($t->sourceAccount->name ?? '—', $cols[4] - 2), 1, 0, 'R', true);
             $pdf->Cell($cols[5], 7, $pdf->fit($t->description ?? '—', $cols[5] - 2), 1, 0, 'R', true);
             $pdf->Cell($cols[6], 7, PdfReport::n($t->amount), 1, 1, 'C', true);
@@ -189,21 +205,127 @@ class PettyCashController extends Controller
         return $pdf->respond('petty-cash-transactions.pdf');
     }
 
+    public function transactionsExcel(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'type' => ['nullable', 'in:expense,replenishment'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+            'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+        ]);
+
+        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name'])
+            ->when($request->type, fn ($q) => $q->where('type', $request->type))
+            ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
+            ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
+            ->when($request->source_account_id, fn ($q) => $q->where('source_account_id', $request->source_account_id))
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get();
+
+        $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
+        $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'حالة الاعتماد', 'تاريخ الاعتماد', 'المبلغ'];
+
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('حركات صندوق النثريات');
+        $sheet->setRightToLeft(true);
+        $sheet->fromArray($headers, null, 'A1');
+
+        $lastCol = chr(ord('A') + count($headers) - 1);
+        $sheet->getStyle("A1:{$lastCol}1")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1565C0']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $row = 2;
+        $totalExpense = 0.0;
+        $totalReplenishment = 0.0;
+
+        foreach ($transactions as $t) {
+            $statusLabel = $t->type === 'expense'
+                ? ($t->status === 'approved' ? 'معتمد' : 'بانتظار اعتماد المدير')
+                : '';
+
+            $sheet->fromArray([
+                $t->date->format('Y-m-d'),
+                $typeLabels[$t->type],
+                $t->beneficiary_name ?? '',
+                $this->contraAccountLabel($t),
+                $t->sourceAccount->name ?? '',
+                $t->description ?? '',
+                $statusLabel,
+                $t->manager_approved_at?->format('Y-m-d H:i') ?? '',
+                (float) $t->amount,
+            ], null, "A{$row}");
+
+            if ($t->type === 'expense') {
+                $totalExpense += (float) $t->amount;
+            } else {
+                $totalReplenishment += (float) $t->amount;
+            }
+            $row++;
+        }
+
+        $lastDataRow = $row - 1;
+        if ($lastDataRow >= 2) {
+            $sheet->getStyle("A2:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("I2:I{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+        }
+
+        $row++;
+        $firstTotalsRow = $row;
+        $sheet->setCellValue("H{$row}", 'إجمالي المصروفات');
+        $sheet->setCellValue("I{$row}", $totalExpense);
+        $row++;
+        $sheet->setCellValue("H{$row}", 'إجمالي التغذية');
+        $sheet->setCellValue("I{$row}", $totalReplenishment);
+        $row++;
+        $sheet->setCellValue("H{$row}", 'صافي التغيير');
+        $sheet->setCellValue("I{$row}", $totalReplenishment - $totalExpense);
+
+        $sheet->getStyle("H{$firstTotalsRow}:I{$row}")->applyFromArray([
+            'font' => ['bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
+        ]);
+        $sheet->getStyle("I{$firstTotalsRow}:I{$row}")->getNumberFormat()->setFormatCode('#,##0');
+
+        foreach (range('A', $lastCol) as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        $filename = 'petty-cash-transactions.xlsx';
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
     public function storeExpense(Request $request, FirestoreApprovalService $firestore, FirebaseStorageService $storage, WhatsAppService $whatsapp): JsonResponse
     {
         $data = $request->validate([
             'date' => ['required', 'date'],
-            'amount' => ['required', 'numeric', 'min:0.01'],
             'beneficiary_name' => ['nullable', 'string', 'max:255'],
-            'contra_account_id' => ['required', 'integer', 'exists:accounts,id'],
             'source_account_id' => ['required', 'integer', 'exists:accounts,id'],
             'description' => ['nullable', 'string', 'max:500'],
             'document' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'amount' => ['required_without:lines', 'nullable', 'numeric', 'min:0.01'],
+            'contra_account_id' => ['required_without:lines', 'nullable', 'integer', 'exists:accounts,id'],
+            'lines' => ['nullable', 'array', 'min:2'],
+            'lines.*.contra_account_id' => ['required_with:lines', 'integer', 'exists:accounts,id'],
+            'lines.*.amount' => ['required_with:lines', 'numeric', 'min:0.01'],
         ]);
 
         if (FiscalYear::isDateLocked($data['date'])) {
             abort(422, 'هذه الفترة مغلقة ولا يمكن إضافة مصروف لها.');
         }
+
+        $isCompound = ! empty($data['lines']);
+        $amount = $isCompound ? collect($data['lines'])->sum('amount') : $data['amount'];
 
         $documentPath = null;
         $documentOriginalName = null;
@@ -212,21 +334,27 @@ class PettyCashController extends Controller
             $documentOriginalName = $request->file('document')->getClientOriginalName();
         }
 
-        $transaction = DB::transaction(function () use ($request, $data, $documentPath, $documentOriginalName) {
-            return PettyCashTransaction::create([
+        $transaction = DB::transaction(function () use ($request, $data, $isCompound, $amount, $documentPath, $documentOriginalName) {
+            $transaction = PettyCashTransaction::create([
                 'source_account_id' => $data['source_account_id'],
                 'created_by_user_id' => $request->user()->id,
                 'type' => 'expense',
                 'status' => 'pending',
                 'date' => $data['date'],
-                'amount' => $data['amount'],
+                'amount' => $amount,
                 'beneficiary_name' => $data['beneficiary_name'] ?? null,
-                'contra_account_id' => $data['contra_account_id'],
+                'contra_account_id' => $isCompound ? null : $data['contra_account_id'],
                 'description' => $data['description'] ?? null,
                 'document_path' => $documentPath,
                 'document_original_name' => $documentOriginalName,
                 'journal_entry_id' => null,
             ]);
+
+            if ($isCompound) {
+                $transaction->lines()->createMany($data['lines']);
+            }
+
+            return $transaction;
         });
 
         [$documentUrl, $documentType] = $this->uploadReceiptToFirebaseStorage($storage, $transaction);
@@ -249,7 +377,7 @@ class PettyCashController extends Controller
         $notifications = $notifyOnCreate ? $whatsapp->sendApprovalNotifications($transaction) : [];
 
         return response()->json([
-            ...$transaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name'])->toArray(),
+            ...$transaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name'])->toArray(),
             'notifications' => $notifications,
         ], 201);
     }
@@ -321,7 +449,7 @@ class PettyCashController extends Controller
     {
         $transaction = $service->reconcileFromFirestore($pettyCashTransaction);
 
-        return response()->json($transaction->load(['contraAccount:id,code,name', 'managerApprovedBy:id,name']));
+        return response()->json($transaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'managerApprovedBy:id,name']));
     }
 
     public function approveByManager(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
@@ -362,7 +490,7 @@ class PettyCashController extends Controller
             }
         }
 
-        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name']));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name']));
     }
 
     /** DELETE /petty-cash/transactions/{id}/document — remove the attached receipt without replacing it. */
@@ -387,7 +515,17 @@ class PettyCashController extends Controller
             ]);
         }
 
-        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name']));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name']));
+    }
+
+    /** A compound transaction has no single contra account — join its lines' account names instead. */
+    private function contraAccountLabel(PettyCashTransaction $t): string
+    {
+        if ($t->contraAccount) {
+            return $t->contraAccount->name;
+        }
+
+        return $t->lines->pluck('contraAccount.name')->filter()->implode('، ');
     }
 
     /**
