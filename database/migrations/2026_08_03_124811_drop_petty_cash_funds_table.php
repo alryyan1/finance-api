@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -11,12 +12,18 @@ return new class extends Migration
      */
     public function up(): void
     {
-        // Defensive: on a DB whose `migrations` table doesn't perfectly reflect its
-        // actual schema (e.g. a restored/diagnostic copy), the fund_id foreign key
-        // added back in 2026_07_31_223945 can still be present even though the
-        // 2026_08_03_124810 migration that's supposed to drop it is recorded as
-        // already run — which makes this DROP TABLE fail with a parent-row
-        // constraint error. Clear it here too so the drop is safe either way.
+        // No historical petty cash data needs to survive this refactor — wipe it
+        // first so nothing is left holding a reference to petty_cash_funds. This
+        // also sidesteps the case where a DB's `migrations` table doesn't
+        // perfectly reflect its actual schema (e.g. a restored/diagnostic copy):
+        // the fund_id foreign key from 2026_07_31_223945 can still be present
+        // even though the 2026_08_03_124810 migration that's supposed to drop it
+        // is recorded as already run, which made this DROP TABLE fail with a
+        // parent-row constraint error.
+        if (Schema::hasTable('petty_cash_transactions')) {
+            DB::table('petty_cash_transactions')->truncate();
+        }
+
         if (Schema::hasColumn('petty_cash_transactions', 'fund_id')) {
             Schema::table('petty_cash_transactions', function (Blueprint $table) {
                 $table->dropConstrainedForeignId('fund_id');
