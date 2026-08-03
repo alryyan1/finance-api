@@ -11,6 +11,18 @@ return new class extends Migration
      */
     public function up(): void
     {
+        // Defensive: on a DB whose `migrations` table doesn't perfectly reflect its
+        // actual schema (e.g. a restored/diagnostic copy), the fund_id foreign key
+        // added back in 2026_07_31_223945 can still be present even though the
+        // 2026_08_03_124810 migration that's supposed to drop it is recorded as
+        // already run — which makes this DROP TABLE fail with a parent-row
+        // constraint error. Clear it here too so the drop is safe either way.
+        if (Schema::hasColumn('petty_cash_transactions', 'fund_id')) {
+            Schema::table('petty_cash_transactions', function (Blueprint $table) {
+                $table->dropConstrainedForeignId('fund_id');
+            });
+        }
+
         Schema::dropIfExists('petty_cash_funds');
     }
 
