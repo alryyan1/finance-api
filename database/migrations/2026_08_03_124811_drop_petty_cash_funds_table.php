@@ -13,13 +13,7 @@ return new class extends Migration
     public function up(): void
     {
         // No historical petty cash data needs to survive this refactor — wipe it
-        // first so nothing is left holding a reference to petty_cash_funds. This
-        // also sidesteps the case where a DB's `migrations` table doesn't
-        // perfectly reflect its actual schema (e.g. a restored/diagnostic copy):
-        // the fund_id foreign key from 2026_07_31_223945 can still be present
-        // even though the 2026_08_03_124810 migration that's supposed to drop it
-        // is recorded as already run, which made this DROP TABLE fail with a
-        // parent-row constraint error.
+        // first so nothing is left holding a reference to petty_cash_funds.
         if (Schema::hasTable('petty_cash_transactions')) {
             DB::table('petty_cash_transactions')->truncate();
         }
@@ -30,7 +24,24 @@ return new class extends Migration
             });
         }
 
-        Schema::dropIfExists('petty_cash_funds');
+        // Belt-and-suspenders: on a DB whose `migrations` table doesn't perfectly
+        // reflect its actual schema (e.g. a restored/diagnostic copy), some other
+        // foreign key we don't know about can still reference petty_cash_funds
+        // even after the steps above — which keeps failing this DROP TABLE with a
+        // parent-row constraint error no matter what we clean up by name. Drop it
+        // with FK checks off so it goes through regardless of what's pointing at it.
+        $driver = DB::connection()->getDriverName();
+        if ($driver === 'mysql') {
+            DB::statement('SET FOREIGN_KEY_CHECKS=0');
+        }
+
+        try {
+            Schema::dropIfExists('petty_cash_funds');
+        } finally {
+            if ($driver === 'mysql') {
+                DB::statement('SET FOREIGN_KEY_CHECKS=1');
+            }
+        }
     }
 
     /**
