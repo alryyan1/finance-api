@@ -24,8 +24,8 @@ class FiscalYearController extends Controller
 
             return array_merge($y->toArray(), [
                 'unposted_count' => $unposted,
-                'net_profit'     => number_format($profit, 2, '.', ''),
-                'is_profit'      => $profit >= 0,
+                'net_profit' => number_format($profit, 2, '.', ''),
+                'is_profit' => $profit >= 0,
             ]);
         });
 
@@ -35,19 +35,18 @@ class FiscalYearController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'name'        => ['required', 'string', 'max:100'],
-            'period_type' => ['required', 'in:yearly,monthly'],
-            'start_date'  => ['required', 'date'],
-            'end_date'    => ['required', 'date', 'after:start_date'],
+            'name' => ['required', 'string', 'max:100'],
+            'start_date' => ['required', 'date'],
+            'end_date' => ['required', 'date', 'after:start_date'],
         ]);
 
         $overlap = FiscalYear::where(function ($q) use ($data) {
             $q->whereBetween('start_date', [$data['start_date'], $data['end_date']])
-              ->orWhereBetween('end_date',  [$data['start_date'], $data['end_date']])
-              ->orWhere(function ($q2) use ($data) {
-                  $q2->where('start_date', '<=', $data['start_date'])
-                     ->where('end_date',   '>=', $data['end_date']);
-              });
+                ->orWhereBetween('end_date', [$data['start_date'], $data['end_date']])
+                ->orWhere(function ($q2) use ($data) {
+                    $q2->where('start_date', '<=', $data['start_date'])
+                        ->where('end_date', '>=', $data['end_date']);
+                });
         })->exists();
 
         if ($overlap) {
@@ -77,20 +76,23 @@ class FiscalYearController extends Controller
         DB::transaction(function () use ($year, $arabicMonths, &$created, &$skipped) {
             for ($m = 1; $m <= 12; $m++) {
                 $start = Carbon::create($year, $m, 1)->startOfMonth()->toDateString();
-                $end   = Carbon::create($year, $m, 1)->endOfMonth()->toDateString();
+                $end = Carbon::create($year, $m, 1)->endOfMonth()->toDateString();
 
                 $overlap = FiscalYear::where('start_date', '<=', $end)
                     ->where('end_date', '>=', $start)
                     ->exists();
 
-                if ($overlap) { $skipped++; continue; }
+                if ($overlap) {
+                    $skipped++;
+
+                    continue;
+                }
 
                 FiscalYear::create([
-                    'name'        => $arabicMonths[$m] . ' ' . $year,
-                    'period_type' => 'monthly',
-                    'start_date'  => $start,
-                    'end_date'    => $end,
-                    'status'      => 'open',
+                    'name' => $arabicMonths[$m].' '.$year,
+                    'start_date' => $start,
+                    'end_date' => $end,
+                    'status' => 'open',
                 ]);
                 $created++;
             }
@@ -110,7 +112,7 @@ class FiscalYearController extends Controller
         ]);
 
         $from = $fiscalYear->start_date->toDateString();
-        $to   = $fiscalYear->end_date->toDateString();
+        $to = $fiscalYear->end_date->toDateString();
 
         $rows = DB::table('journal_entry_lines as l')
             ->join('accounts as a', 'a.id', '=', 'l.account_id')
@@ -124,7 +126,7 @@ class FiscalYearController extends Controller
             ->groupBy('a.id', 'a.type')
             ->get();
 
-        $lines     = [];
+        $lines = [];
         $netProfit = 0;
 
         foreach ($rows as $row) {
@@ -134,13 +136,13 @@ class FiscalYearController extends Controller
             if ($row->type === 'revenue') {
                 $net = $c - $d;
                 if (abs($net) > 0.005) {
-                    $lines[]    = ['account_id' => $row->account_id, 'debit' => $net, 'credit' => 0, 'description' => 'إقفال إيرادات'];
+                    $lines[] = ['account_id' => $row->account_id, 'debit' => $net, 'credit' => 0, 'description' => 'إقفال إيرادات'];
                     $netProfit += $net;
                 }
             } else {
                 $net = $d - $c;
                 if (abs($net) > 0.005) {
-                    $lines[]    = ['account_id' => $row->account_id, 'debit' => 0, 'credit' => $net, 'description' => 'إقفال مصروفات'];
+                    $lines[] = ['account_id' => $row->account_id, 'debit' => 0, 'credit' => $net, 'description' => 'إقفال مصروفات'];
                     $netProfit -= $net;
                 }
             }
@@ -156,10 +158,10 @@ class FiscalYearController extends Controller
             $closingEntry = null;
             if (! empty($lines)) {
                 $closingEntry = JournalEntry::create([
-                    'date'        => $to,
-                    'reference'   => 'CLOSE-' . $fiscalYear->id,
-                    'description' => 'قيد إقفال السنة المالية: ' . $fiscalYear->name,
-                    'is_posted'   => true,
+                    'date' => $to,
+                    'reference' => 'CLOSE-'.$fiscalYear->id,
+                    'description' => 'قيد إقفال السنة المالية: '.$fiscalYear->name,
+                    'is_posted' => true,
                 ]);
                 foreach ($lines as $line) {
                     $closingEntry->lines()->create(array_merge($line, ['party_id' => null]));
@@ -167,9 +169,9 @@ class FiscalYearController extends Controller
             }
 
             $fiscalYear->update([
-                'status'           => 'closed',
+                'status' => 'closed',
                 'closing_entry_id' => $closingEntry?->id,
-                'closed_at'        => now(),
+                'closed_at' => now(),
             ]);
 
             // Auto-carry closing balances to the next fiscal year
@@ -188,13 +190,16 @@ class FiscalYearController extends Controller
         DB::transaction(function () use ($fiscalYear) {
             if ($fiscalYear->closing_entry_id) {
                 $entry = JournalEntry::find($fiscalYear->closing_entry_id);
-                if ($entry) { $entry->lines()->delete(); $entry->delete(); }
+                if ($entry) {
+                    $entry->lines()->delete();
+                    $entry->delete();
+                }
             }
 
             $fiscalYear->update([
-                'status'           => 'open',
+                'status' => 'open',
                 'closing_entry_id' => null,
-                'closed_at'        => null,
+                'closed_at' => null,
             ]);
         });
 
@@ -209,11 +214,11 @@ class FiscalYearController extends Controller
 
         $fiscalYear = FiscalYear::where('status', 'open')
             ->where('start_date', '<=', $date)
-            ->where('end_date',   '>=', $date)
+            ->where('end_date', '>=', $date)
             ->first(['id', 'name', 'start_date', 'end_date', 'status']);
 
         return response()->json([
-            'covered'     => $fiscalYear !== null,
+            'covered' => $fiscalYear !== null,
             'fiscal_year' => $fiscalYear,
         ]);
     }
@@ -231,7 +236,7 @@ class FiscalYearController extends Controller
             return response()->json(['message' => 'لا توجد فترة مالية تالية لترحيل الأرصدة إليها'], 422);
         }
 
-        return response()->json(['message' => 'تم ترحيل الأرصدة إلى: ' . $next->name]);
+        return response()->json(['message' => 'تم ترحيل الأرصدة إلى: '.$next->name]);
     }
 
     // ─────────────────────────── Private helpers ────────────────────────────
@@ -242,7 +247,9 @@ class FiscalYearController extends Controller
             ->orderBy('start_date')
             ->first();
 
-        if (! $nextYear) return null;
+        if (! $nextYear) {
+            return null;
+        }
 
         $asOf = $fiscalYear->end_date->toDateString();
 
@@ -272,21 +279,21 @@ class FiscalYearController extends Controller
             $j = $journalBal->get($accountId);
             $o = $openingBal->get($accountId);
 
-            $totalDebit  = (float) ($j->total_debit  ?? 0) + (float) ($o->debit  ?? 0);
+            $totalDebit = (float) ($j->total_debit ?? 0) + (float) ($o->debit ?? 0);
             $totalCredit = (float) ($j->total_credit ?? 0) + (float) ($o->credit ?? 0);
-            $type        = $j->type ?? DB::table('accounts')->where('id', $accountId)->value('type');
+            $type = $j->type ?? DB::table('accounts')->where('id', $accountId)->value('type');
             $debitNormal = $type === 'asset';
 
-            $net    = $debitNormal ? ($totalDebit - $totalCredit) : ($totalCredit - $totalDebit);
-            $debit  = $debitNormal ? max($net, 0)  : max(-$net, 0);
-            $credit = $debitNormal ? max(-$net, 0) : max($net,  0);
+            $net = $debitNormal ? ($totalDebit - $totalCredit) : ($totalCredit - $totalDebit);
+            $debit = $debitNormal ? max($net, 0) : max(-$net, 0);
+            $credit = $debitNormal ? max(-$net, 0) : max($net, 0);
 
             if ($debit > 0.005 || $credit > 0.005) {
                 OpeningBalance::create([
                     'fiscal_year_id' => $nextYear->id,
-                    'account_id'     => $accountId,
-                    'debit'          => round($debit, 2),
-                    'credit'         => round($credit, 2),
+                    'account_id' => $accountId,
+                    'debit' => round($debit, 2),
+                    'credit' => round($credit, 2),
                 ]);
             }
         }

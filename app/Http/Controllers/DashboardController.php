@@ -7,7 +7,6 @@ use App\Models\FiscalYear;
 use App\Models\JournalEntry;
 use App\Models\JournalEntryLine;
 use App\Models\Party;
-use App\Models\PettyCashFund;
 use App\Models\PettyCashTransaction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
@@ -45,22 +44,9 @@ class DashboardController extends Controller
             ->limit(6)
             ->get(['id', 'date', 'reference', 'description', 'is_posted']);
 
-        // Petty cash funds: balance vs configured thresholds
-        $pettyCashFunds = PettyCashFund::where('status', 'active')
-            ->get(['id', 'name', 'current_balance', 'max_amount', 'low_balance_threshold'])
-            ->map(fn (PettyCashFund $fund) => [
-                'id' => $fund->id,
-                'name' => $fund->name,
-                'current_balance' => $fund->current_balance,
-                'max_amount' => $fund->max_amount,
-                'low_balance_threshold' => $fund->low_balance_threshold,
-                'is_low' => $fund->current_balance <= $fund->low_balance_threshold,
-            ]);
-
         // Petty cash expenses awaiting approval
         $pendingPettyCash = PettyCashTransaction::where('status', 'pending');
         $pendingApprovalsCount = (clone $pendingPettyCash)->count();
-        $awaitingAuditorCount = (clone $pendingPettyCash)->whereNull('auditor_approved_at')->count();
         $awaitingManagerCount = (clone $pendingPettyCash)->whereNull('manager_approved_at')->count();
 
         // Current fiscal year (the one covering today, if any)
@@ -85,9 +71,7 @@ class DashboardController extends Controller
             'total_movement' => $totalMovement,
             'net_profit' => $netProfit,
             'recent_entries' => $recentEntries,
-            'petty_cash_funds' => $pettyCashFunds,
             'pending_approvals_count' => $pendingApprovalsCount,
-            'awaiting_auditor_count' => $awaitingAuditorCount,
             'awaiting_manager_count' => $awaitingManagerCount,
             'fiscal_year' => $fiscalYear,
             'monthly_trend' => $monthlyTrend,

@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Setting;
+use Illuminate\Http\Response;
 use TCPDF;
 
 /**
@@ -14,15 +16,18 @@ use TCPDF;
  */
 class PdfReport extends TCPDF
 {
-    protected array  $reportCompany = [];
-    protected string $reportTitle   = '';
-    protected string $reportSub     = '';
+    protected array $reportCompany = [];
+
+    protected string $reportTitle = '';
+
+    protected string $reportSub = '';
 
     public function setup(array $company, string $title, string $sub = ''): static
     {
         $this->reportCompany = $company;
-        $this->reportTitle   = $title;
-        $this->reportSub     = $sub;
+        $this->reportTitle = $title;
+        $this->reportSub = $sub;
+
         return $this;
     }
 
@@ -30,13 +35,13 @@ class PdfReport extends TCPDF
 
     public function Header(): void
     {
-        $company  = $this->reportCompany;
+        $company = $this->reportCompany;
         $logoPath = $company['_logo_path'] ?? null;
-        $logoPos  = $company['logo_position'] ?? 'right';
+        $logoPos = $company['logo_position'] ?: 'right';
 
-        $pageW    = $this->getPageWidth();
-        $lM       = $this->lMargin;
-        $rM       = $this->rMargin;
+        $pageW = $this->getPageWidth();
+        $lM = $this->lMargin;
+        $rM = $this->rMargin;
         $contentW = $pageW - $lM - $rM;
 
         if ($logoPath && $logoPos === 'full') {
@@ -62,14 +67,14 @@ class PdfReport extends TCPDF
         $this->SetFont('arialbd', '', 11);
         $this->Cell($contentW, 5, $c['company_name'] ?? '', 0, 1, 'C');
 
-        if (!empty($c['company_address'])) {
+        if (! empty($c['company_address'])) {
             $this->SetFont('arial', '', 8);
             $this->SetTextColor(80, 80, 80);
             $this->Cell($contentW, 4, $c['company_address'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
-        if (!empty($c['company_phone'])) {
+        if (! empty($c['company_phone'])) {
             $this->SetFont('arial', '', 8);
             $this->SetTextColor(100, 100, 100);
             $this->Cell($contentW, 4, $c['company_phone'], 0, 1, 'C');
@@ -91,29 +96,29 @@ class PdfReport extends TCPDF
     private function headerSide(
         string $logo,
         string $side,
-        float  $contentW,
-        float  $lM,
-        float  $rM,
-        float  $pageW,
+        float $contentW,
+        float $lM,
+        float $rM,
+        float $pageW,
     ): void {
-        $c      = $this->reportCompany;
-        $logoW  = 30;  // mm
-        $logoH  = 20;  // mm
-        $gap    = 4;   // mm between logo and text
-        $textW  = $contentW - $logoW - $gap;
+        $c = $this->reportCompany;
+        $logoW = 30;  // mm
+        $logoH = 20;  // mm
+        $gap = 4;   // mm between logo and text
+        $textW = $contentW - $logoW - $gap;
         $startY = 5;
 
         if ($side === 'right') {
             // Logo physically on the right
-            $logoX     = $pageW - $rM - $logoW;
+            $logoX = $pageW - $rM - $logoW;
             // Text area right edge is just before the logo
-            $textX2    = $pageW - $rM - $logoW - $gap;
+            $textX2 = $pageW - $rM - $logoW - $gap;
             $setXParam = $pageW - $textX2;   // RTL SetX param
         } else {
             // Logo physically on the left
-            $logoX     = $lM;
+            $logoX = $lM;
             // Text fills the rest (up to right margin)
-            $textX2    = $pageW - $rM;
+            $textX2 = $pageW - $rM;
             $setXParam = $rM;                // RTL SetX param (default start)
         }
 
@@ -127,7 +132,7 @@ class PdfReport extends TCPDF
         $this->SetFont('arialbd', '', 13);
         $this->Cell($textW, 7, $c['company_name'] ?? 'الشركة', 0, 1, 'C');
 
-        if (!empty($c['company_address'])) {
+        if (! empty($c['company_address'])) {
             $this->SetX($setXParam);
             $this->SetFont('arial', '', 9);
             $this->SetTextColor(80, 80, 80);
@@ -135,7 +140,7 @@ class PdfReport extends TCPDF
             $this->SetTextColor(0, 0, 0);
         }
 
-        if (!empty($c['company_phone'])) {
+        if (! empty($c['company_phone'])) {
             $this->SetX($setXParam);
             $this->SetFont('arial', '', 8);
             $this->SetTextColor(100, 100, 100);
@@ -156,16 +161,16 @@ class PdfReport extends TCPDF
         $this->SetY(5);
 
         $this->SetFont('arialbd', '', 14);
-        $this->Cell($contentW, 7, $c['company_name'] ?? 'الشركة', 0, 1, 'C');
+        $this->Cell(0, 7, $c['company_name'] ?? 'الشركة', 0, 1, 'C');
 
-        if (!empty($c['company_address'])) {
+        if (! empty($c['company_address'])) {
             $this->SetFont('arial', '', 9);
             $this->SetTextColor(80, 80, 80);
             $this->Cell($contentW, 5, $c['company_address'], 0, 1, 'C');
             $this->SetTextColor(0, 0, 0);
         }
 
-        if (!empty($c['company_phone'])) {
+        if (! empty($c['company_phone'])) {
             $this->SetFont('arial', '', 8);
             $this->SetTextColor(100, 100, 100);
             $this->Cell($contentW, 4, $c['company_phone'], 0, 1, 'C');
@@ -209,7 +214,7 @@ class PdfReport extends TCPDF
         $this->SetTextColor(150, 150, 150);
         $w = $this->getPageWidth() - $this->lMargin - $this->rMargin;
         $this->Cell($w, 5,
-            date('Y-m-d') . '   |   صفحة ' . $this->getAliasNumPage() . ' من ' . $this->getAliasNbPages(),
+            date('Y-m-d').'   |   صفحة '.$this->getAliasNumPage().' من '.$this->getAliasNbPages(),
             0, 0, 'C');
         $this->SetTextColor(0, 0, 0);
     }
@@ -222,26 +227,26 @@ class PdfReport extends TCPDF
      */
     public static function make(string $title, string $sub = ''): static
     {
-        $keys    = ['company_name', 'company_address', 'company_phone', 'company_logo', 'logo_position'];
-        $company = \App\Models\Setting::whereIn('key', $keys)
+        $keys = ['company_name', 'company_address', 'company_phone', 'company_logo', 'logo_position'];
+        $company = Setting::whereIn('key', $keys)
             ->get()->pluck('value', 'key')->all();
 
         // Resolve logo to an absolute file path for TCPDF
         $logoRel = $company['company_logo'] ?? '';
         if ($logoRel) {
-            $abs = storage_path('app/public/' . $logoRel);
+            $abs = storage_path('app/public/'.$logoRel);
             $company['_logo_path'] = file_exists($abs) ? $abs : null;
         } else {
             $company['_logo_path'] = null;
         }
 
         // Dynamic top margin: larger when a logo is present
-        $hasLogo   = $company['_logo_path'] !== null;
-        $logoPos   = $company['logo_position'] ?? 'right';
+        $hasLogo = $company['_logo_path'] !== null;
+        $logoPos = $company['logo_position'] ?: 'right';
         $topMargin = match (true) {
             $hasLogo && $logoPos === 'full' => 68,
-            $hasLogo                        => 55,
-            default                         => 48,
+            $hasLogo => 55,
+            default => 48,
         };
 
         $pdf = new static('P', 'mm', 'A4', true, 'UTF-8', false);
@@ -251,19 +256,20 @@ class PdfReport extends TCPDF
         $pdf->SetHeaderMargin(5);
         $pdf->SetFooterMargin(10);
         $pdf->SetAutoPageBreak(true, 20);
-        $pdf->SetRTL(true);
+        $pdf->SetRTL(false);
         $pdf->setup($company, $title, $sub);
         $pdf->AddPage();
         $pdf->SetFont('arial', '', 9);
+
         return $pdf;
     }
 
     // ── Output ────────────────────────────────────────────────────────────────
 
-    public function respond(string $filename): \Illuminate\Http\Response
+    public function respond(string $filename): Response
     {
         return response($this->Output('', 'S'), 200, [
-            'Content-Type'        => 'application/pdf',
+            'Content-Type' => 'application/pdf',
             'Content-Disposition' => "inline; filename=\"{$filename}\"",
         ]);
     }
@@ -313,15 +319,16 @@ class PdfReport extends TCPDF
             return $text;
         }
         $ellipsis = '…';
-        $avail    = $maxMm - $this->GetStringWidth($ellipsis);
+        $avail = $maxMm - $this->GetStringWidth($ellipsis);
         $lo = 0;
         $hi = mb_strlen($text);
         while ($lo < $hi) {
-            $mid = (int)(($lo + $hi + 1) / 2);
+            $mid = (int) (($lo + $hi + 1) / 2);
             $this->GetStringWidth(mb_substr($text, 0, $mid)) <= $avail
                 ? $lo = $mid : $hi = $mid - 1;
         }
-        return mb_substr($text, 0, $lo) . $ellipsis;
+
+        return mb_substr($text, 0, $lo).$ellipsis;
     }
 
     /** Totals row */

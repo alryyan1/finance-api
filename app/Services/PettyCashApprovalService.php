@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\Account;
 use App\Models\FiscalYear;
 use App\Models\JournalEntry;
-use App\Models\PettyCashFund;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use Illuminate\Support\Facades\DB;
@@ -22,51 +21,40 @@ class PettyCashApprovalService
     ) {}
 
     /**
-     * Record one approval (auditor or manager) for a pending petty cash expense.
-     * The manager's approval alone posts the journal entry and deducts the fund
-     * balance — the auditor's approval is just a review record, it never gates
-     * posting. Idempotent — re-approving the same role for an already approved
-     * transaction is a no-op, so redelivered webhooks are safe.
+     * Record the manager's approval for a pending petty cash expense — this is
+     * what posts the journal entry. Idempotent — re-approving an already
+     * approved transaction is a no-op, so redelivered webhooks are safe.
      */
-    public function approve(PettyCashTransaction $transaction, string $role, int $approverUserId): PettyCashTransaction
+    public function approve(PettyCashTransaction $transaction, int $approverUserId): PettyCashTransaction
     {
-        abort_unless(in_array($role, ['auditor', 'manager'], true), 422);
         abort_if($transaction->type !== 'expense', 422, 'لا يخضع هذا النوع من الحركات للاعتماد.');
 
-        $atColumn = "{$role}_approved_at";
-        $byColumn = "{$role}_approved_by_user_id";
         $wasNewApproval = false;
 
-        $transaction = DB::transaction(function () use ($transaction, $atColumn, $byColumn, $approverUserId, &$wasNewApproval) {
+        $transaction = DB::transaction(function () use ($transaction, $approverUserId, &$wasNewApproval) {
             $transaction = PettyCashTransaction::whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
-            if ($transaction->{$atColumn} !== null) {
-                return $transaction->load(['contraAccount:id,code,name', 'auditorApprovedBy:id,name', 'managerApprovedBy:id,name']);
+            if ($transaction->manager_approved_at !== null) {
+                return $transaction->load(['contraAccount:id,code,name', 'managerApprovedBy:id,name']);
             }
 
-            $transaction->update([$atColumn => now(), $byColumn => $approverUserId]);
+            $transaction->update(['manager_approved_at' => now(), 'manager_approved_by_user_id' => $approverUserId]);
             $wasNewApproval = true;
+
             $transaction->refresh();
+            $this->postJournalEntry($transaction);
 
-            // journal_entry_id guards against double-posting: if the manager already
-            // approved earlier, isReadyToPost() stays true forever, so an auditor
-            // approval arriving afterward must not re-trigger posting.
-            if ($transaction->isReadyToPost() && $transaction->journal_entry_id === null) {
-                $this->postAndDeduct($transaction);
-            }
-
-            return $transaction->fresh(['contraAccount:id,code,name', 'auditorApprovedBy:id,name', 'managerApprovedBy:id,name']);
+            return $transaction->fresh(['contraAccount:id,code,name', 'managerApprovedBy:id,name']);
         });
 
         // Firestore is a best-effort mirror, not the source of truth — never let it
         // fail the approval itself (e.g. when Firebase credentials aren't configured).
         if ($wasNewApproval) {
             try {
-                $this->firestore->markApproved($transaction->id, $role);
+                $this->firestore->markApproved($transaction->id);
             } catch (\Throwable $e) {
                 Log::error('Failed to sync petty cash approval to Firestore', [
                     'transaction_id' => $transaction->id,
-                    'role' => $role,
                     'error' => $e->getMessage(),
                 ]);
             }
@@ -84,33 +72,22 @@ class PettyCashApprovalService
      * loads — cheap, since it's a single Firestore read, and a no-op the instant
      * nothing on the mirror doc is new.
      *
-     * Not gated on transaction status: the manager's approval alone flips status
-     * to "approved" (it's what posts the journal entry — see isReadyToPost()), so
-     * gating on status=pending would stop reconciling the auditor's approval (or
-     * a receipt attached afterward) the moment it arrives after the manager's.
+     * Not gated on transaction status: a receipt attached via WhatsApp after the
+     * manager already approved must still sync, so this keeps checking even
+     * once status is "approved".
      */
     public function reconcileFromFirestore(PettyCashTransaction $transaction): PettyCashTransaction
     {
-        if ($transaction->type !== 'expense') {
-            return $transaction;
-        }
 
         $doc = $this->firestore->fetch($transaction->id);
         if (! $doc) {
             return $transaction;
         }
 
-        if (($doc['auditor_approved'] ?? false) && ! $transaction->auditor_approved_at) {
-            $auditorId = (int) Setting::where('key', 'petty_cash_auditor_user_id')->value('value');
-            if ($auditorId) {
-                $transaction = $this->approve($transaction, 'auditor', $auditorId);
-            }
-        }
-
         if (($doc['manager_approved'] ?? false) && ! $transaction->manager_approved_at) {
             $managerId = (int) Setting::where('key', 'petty_cash_manager_user_id')->value('value');
             if ($managerId) {
-                $transaction = $this->approve($transaction, 'manager', $managerId);
+                $transaction = $this->approve($transaction, $managerId);
             }
         }
 
@@ -194,17 +171,14 @@ class PettyCashApprovalService
         $phone = (string) ($request['submitted_by_phone'] ?? '');
 
         try {
-            $fund = PettyCashFund::first();
-            if (! $fund || $fund->status !== 'active') {
-                throw new \RuntimeException('صندوق النثريات غير مُفعّل.');
+            $sourceAccountId = (int) Setting::where('key', 'petty_cash_bank_account_id')->value('value');
+            if (! $sourceAccountId) {
+                throw new \RuntimeException('لم يتم إعداد حساب البنك لصندوق النثريات بعد.');
             }
 
             $amount = (float) ($request['amount'] ?? 0);
             if ($amount <= 0) {
                 throw new \RuntimeException('المبلغ غير صالح.');
-            }
-            if ($amount > (float) $fund->current_balance) {
-                throw new \RuntimeException('رصيد الصندوق غير كافٍ لتغطية هذا المصروف.');
             }
 
             $contraAccount = Account::where('id', (int) ($request['contra_account_id'] ?? 0))
@@ -220,7 +194,7 @@ class PettyCashApprovalService
             }
 
             $transaction = PettyCashTransaction::create([
-                'fund_id' => $fund->id,
+                'source_account_id' => $sourceAccountId,
                 'type' => 'expense',
                 'status' => 'pending',
                 'date' => $date,
@@ -235,7 +209,7 @@ class PettyCashApprovalService
             $this->whatsapp->sendApprovalNotifications($transaction);
 
             if ($phone !== '') {
-                $this->whatsapp->sendText($phone, "تم إنشاء طلب الصرف رقم #{$transaction->id} بمبلغ ".number_format($amount, 2).' بانتظار اعتماد المراجع والمدير.');
+                $this->whatsapp->sendText($phone, "تم إنشاء طلب الصرف رقم #{$transaction->id} بمبلغ ".number_format($amount, 2).' بانتظار اعتماد المدير.');
             }
         } catch (\Throwable $e) {
             Log::error('Failed to import WhatsApp petty cash request', [
@@ -264,14 +238,8 @@ class PettyCashApprovalService
         }
     }
 
-    private function postAndDeduct(PettyCashTransaction $transaction): void
+    private function postJournalEntry(PettyCashTransaction $transaction): void
     {
-        $fund = $transaction->fund()->lockForUpdate()->first();
-
-        if ((float) $transaction->amount > (float) $fund->current_balance) {
-            abort(422, 'رصيد الصندوق غير كافٍ لاعتماد هذا المصروف.');
-        }
-
         $desc = $transaction->description ?? 'مصروف نثرية';
 
         $entry = JournalEntry::create([
@@ -288,7 +256,7 @@ class PettyCashApprovalService
                 'description' => $desc,
             ],
             [
-                'account_id' => $fund->account_id,
+                'account_id' => $transaction->source_account_id,
                 'debit' => 0,
                 'credit' => $transaction->amount,
                 'description' => $desc,
@@ -296,6 +264,5 @@ class PettyCashApprovalService
         ]);
 
         $transaction->update(['journal_entry_id' => $entry->id, 'status' => 'approved']);
-        $fund->decrement('current_balance', $transaction->amount);
     }
 }

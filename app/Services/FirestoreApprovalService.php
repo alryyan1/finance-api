@@ -32,7 +32,6 @@ class FirestoreApprovalService
             'amount' => (float) $transaction->amount,
             'beneficiary_name' => $transaction->beneficiary_name,
             'description' => $transaction->description,
-            'auditor_approved' => false,
             'manager_approved' => false,
             'document_url' => $documentUrl,
             'document_type' => $documentType,
@@ -41,15 +40,15 @@ class FirestoreApprovalService
     }
 
     /**
-     * Mark one role as approved. Safe to call from either the in-app approval
-     * flow or the WhatsApp-tap Cloud Function — merge writes never clobber the
-     * other role's field.
+     * Mark the manager's approval. Safe to call from either the in-app approval
+     * flow or the WhatsApp-tap Cloud Function — a merge write never clobbers
+     * other fields on the mirror doc.
      */
-    public function markApproved(int $transactionId, string $role): void
+    public function markApproved(int $transactionId): void
     {
         $this->patch($this->documentPath((string) $transactionId), [
-            "{$role}_approved" => true,
-            "{$role}_approved_at" => now()->toIso8601String(),
+            'manager_approved' => true,
+            'manager_approved_at' => now()->toIso8601String(),
         ], merge: true);
     }
 
@@ -79,29 +78,26 @@ class FirestoreApprovalService
     }
 
     /**
-     * Mirrors the configured manager/auditor WhatsApp numbers into
+     * Mirrors the configured manager WhatsApp number into
      * finance/{collectionName}/whatsapp_petty_cash_senders — the
      * pettyCashWebhook Cloud Function reads this when it receives a bare
      * image/PDF (not a button tap) to authorize who may attach a receipt via
      * chat. collectionName itself is resolved by the Cloud Function from the
-     * business phone_number_id, not from this doc — this only gates role
-     * (manager/auditor). Called whenever petty cash approval settings are saved.
+     * business phone_number_id, not from this doc — this only gates who may
+     * act. Called whenever petty cash approval settings are saved.
      */
     public function syncWhatsAppSenderConfig(): void
     {
         $managerPhone = (string) Setting::where('key', 'petty_cash_manager_whatsapp_phone')->value('value');
-        $auditorPhone = (string) Setting::where('key', 'petty_cash_auditor_whatsapp_phone')->value('value');
 
-        foreach (['manager' => $managerPhone, 'auditor' => $auditorPhone] as $role => $phone) {
-            $normalized = $this->normalizePhone($phone);
-            if ($normalized === '') {
-                continue;
-            }
-
-            $this->patch($this->senderConfigPath($normalized), [
-                'role' => $role,
-            ]);
+        $normalized = $this->normalizePhone($managerPhone);
+        if ($normalized === '') {
+            return;
         }
+
+        $this->patch($this->senderConfigPath($normalized), [
+            'role' => 'manager',
+        ]);
     }
 
     /**

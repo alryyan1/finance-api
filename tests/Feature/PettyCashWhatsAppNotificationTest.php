@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Account;
-use App\Models\PettyCashFund;
 use App\Models\Setting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,37 +13,30 @@ class PettyCashWhatsAppNotificationTest extends TestCase
 {
     use RefreshDatabase;
 
+    private int $fundAccountId;
+
     private function setUpFund(): Account
     {
         $fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
         $expenseAccount = Account::create(['code' => '501', 'name' => 'Office Supplies', 'type' => 'expense', 'is_active' => true]);
 
-        PettyCashFund::create([
-            'name' => 'Main Fund',
-            'custodian_name' => 'Custodian',
-            'account_id' => $fundAccount->id,
-            'max_amount' => 1000,
-            'low_balance_threshold' => 100,
-            'current_balance' => 500,
-            'status' => 'active',
-        ]);
+        Setting::updateOrCreate(['key' => 'petty_cash_bank_account_id'], ['value' => (string) $fundAccount->id]);
+        $this->fundAccountId = $fundAccount->id;
 
         return $expenseAccount;
     }
 
-    public function test_creating_an_expense_sends_a_whatsapp_template_to_both_approvers(): void
+    public function test_creating_an_expense_sends_a_whatsapp_template_to_the_manager(): void
     {
         config([
             'services.whatsapp.token' => 'test-token',
             'services.whatsapp.phone_number_id' => '1234567890',
             'services.whatsapp.api_version' => 'v20.0',
             'services.whatsapp.manager_template' => 'petty_cash_manager_approval',
-            'services.whatsapp.auditor_template' => 'petty_cash_auditor_approval',
             'services.whatsapp.template_language' => 'ar',
         ]);
 
         Setting::updateOrCreate(['key' => 'petty_cash_manager_whatsapp_phone'], ['value' => '+249900000001']);
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_whatsapp_phone'], ['value' => '+249900000002']);
 
         Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
 
@@ -55,15 +47,14 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 42.5,
             'contra_account_id' => $expenseAccount->id,
+            'source_account_id' => $this->fundAccountId,
             'description' => 'Stationery',
         ])->assertCreated();
 
         $response->assertJsonPath('notifications.0.role', 'manager');
         $response->assertJsonPath('notifications.0.status', 'sent');
-        $response->assertJsonPath('notifications.1.role', 'auditor');
-        $response->assertJsonPath('notifications.1.status', 'sent');
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(1);
 
         Http::assertSent(function ($request) {
             $params = $request['template']['components'][0]['parameters'];
@@ -81,13 +72,12 @@ class PettyCashWhatsAppNotificationTest extends TestCase
                 && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/', $params[3]['text']) === 1
                 && $params[4]['text'] === '—'
                 && $approveButton['index'] === '0'
-                && preg_match('/^petty_cash_approvals:[^:]+:\d+:(manager|auditor)$/', $approveButton['parameters'][0]['payload']) === 1
+                && preg_match('/^petty_cash_approvals:[^:]+:\d+:manager$/', $approveButton['parameters'][0]['payload']) === 1
                 && $documentButton['index'] === '1'
-                && preg_match('/^petty_cash_documents:[^:]+:\d+:(manager|auditor):(image|document|none)$/', $documentButton['parameters'][0]['payload']) === 1;
+                && preg_match('/^petty_cash_documents:[^:]+:\d+:manager:(image|document|none)$/', $documentButton['parameters'][0]['payload']) === 1;
         });
 
         Http::assertSent(fn ($request) => $request['to'] === '+249900000001' && $request['template']['name'] === 'petty_cash_manager_approval');
-        Http::assertSent(fn ($request) => $request['to'] === '+249900000002' && $request['template']['name'] === 'petty_cash_auditor_approval');
     }
 
     public function test_no_whatsapp_request_sent_when_phone_or_template_missing(): void
@@ -101,10 +91,10 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 10,
             'contra_account_id' => $expenseAccount->id,
+            'source_account_id' => $this->fundAccountId,
         ])->assertCreated();
 
         $response->assertJsonPath('notifications.0.status', 'skipped');
-        $response->assertJsonPath('notifications.1.status', 'skipped');
 
         Http::assertNothingSent();
     }
@@ -116,11 +106,9 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'services.whatsapp.phone_number_id' => '1234567890',
             'services.whatsapp.api_version' => 'v20.0',
             'services.whatsapp.manager_template' => 'petty_cash_manager_approval',
-            'services.whatsapp.auditor_template' => 'petty_cash_auditor_approval',
         ]);
 
         Setting::updateOrCreate(['key' => 'petty_cash_manager_whatsapp_phone'], ['value' => '+249900000001']);
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_whatsapp_phone'], ['value' => '+249900000002']);
 
         Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
 
@@ -131,18 +119,18 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 10,
             'contra_account_id' => $expenseAccount->id,
+            'source_account_id' => $this->fundAccountId,
         ])->json();
 
-        Http::assertSentCount(2);
+        Http::assertSentCount(1);
 
         $response = $this->actingAs($user)
             ->postJson("/api/petty-cash/transactions/{$created['id']}/notify");
 
         $response->assertOk();
         $response->assertJsonPath('notifications.0.status', 'sent');
-        $response->assertJsonPath('notifications.1.status', 'sent');
 
-        Http::assertSentCount(4);
+        Http::assertSentCount(2);
     }
 
     public function test_notify_on_create_disabled_skips_sending_on_creation(): void
@@ -152,11 +140,9 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'services.whatsapp.phone_number_id' => '1234567890',
             'services.whatsapp.api_version' => 'v20.0',
             'services.whatsapp.manager_template' => 'petty_cash_manager_approval',
-            'services.whatsapp.auditor_template' => 'petty_cash_auditor_approval',
         ]);
 
         Setting::updateOrCreate(['key' => 'petty_cash_manager_whatsapp_phone'], ['value' => '+249900000001']);
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_whatsapp_phone'], ['value' => '+249900000002']);
         Setting::updateOrCreate(['key' => 'petty_cash_notify_on_create'], ['value' => '0']);
 
         Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
@@ -168,51 +154,16 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 10,
             'contra_account_id' => $expenseAccount->id,
+            'source_account_id' => $this->fundAccountId,
         ])->assertCreated();
 
         $response->assertJsonPath('notifications', []);
         Http::assertNothingSent();
     }
 
-    public function test_notify_recipients_setting_restricts_who_gets_notified(): void
-    {
-        config([
-            'services.whatsapp.token' => 'test-token',
-            'services.whatsapp.phone_number_id' => '1234567890',
-            'services.whatsapp.api_version' => 'v20.0',
-            'services.whatsapp.manager_template' => 'petty_cash_manager_approval',
-            'services.whatsapp.auditor_template' => 'petty_cash_auditor_approval',
-        ]);
-
-        Setting::updateOrCreate(['key' => 'petty_cash_manager_whatsapp_phone'], ['value' => '+249900000001']);
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_whatsapp_phone'], ['value' => '+249900000002']);
-        Setting::updateOrCreate(['key' => 'petty_cash_notify_recipients'], ['value' => 'auditor']);
-
-        Http::fake(['graph.facebook.com/*' => Http::response(['messages' => [['id' => 'wamid.test']]], 200)]);
-
-        $expenseAccount = $this->setUpFund();
-        $user = User::factory()->create();
-
-        $response = $this->actingAs($user)->postJson('/api/petty-cash/expenses', [
-            'date' => now()->toDateString(),
-            'amount' => 10,
-            'contra_account_id' => $expenseAccount->id,
-        ])->assertCreated();
-
-        $response->assertJsonPath('notifications.0.role', 'manager');
-        $response->assertJsonPath('notifications.0.status', 'skipped');
-        $response->assertJsonPath('notifications.1.role', 'auditor');
-        $response->assertJsonPath('notifications.1.status', 'sent');
-
-        Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => $request['to'] === '+249900000002' && $request['template']['name'] === 'petty_cash_auditor_approval');
-    }
-
     public function test_resend_notification_endpoint_rejects_already_approved_expense(): void
     {
-        $auditor = User::factory()->create();
         $manager = User::factory()->create();
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_user_id'], ['value' => (string) $auditor->id]);
         Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $manager->id]);
 
         Http::fake();
@@ -224,9 +175,9 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 10,
             'contra_account_id' => $expenseAccount->id,
+            'source_account_id' => $this->fundAccountId,
         ])->json();
 
-        $this->actingAs($auditor)->postJson("/api/petty-cash/transactions/{$created['id']}/approve/auditor")->assertOk();
         $this->actingAs($manager)->postJson("/api/petty-cash/transactions/{$created['id']}/approve/manager")->assertOk();
 
         $this->actingAs($user)

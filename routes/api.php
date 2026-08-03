@@ -60,22 +60,21 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/income-statement/pdf', [ReportController::class, 'incomeStatementPdf']);
     Route::get('reports/balance-sheet', [ReportController::class, 'balanceSheet']);
     Route::get('reports/balance-sheet/pdf', [ReportController::class, 'balanceSheetPdf']);
-    Route::get('petty-cash/fund', [PettyCashController::class, 'fund']);
-    Route::post('petty-cash/fund', [PettyCashController::class, 'setupFund']);
+    Route::get('reports/statement-of-equity', [ReportController::class, 'statementOfEquity']);
+    Route::get('reports/statement-of-equity/pdf', [ReportController::class, 'statementOfEquityPdf']);
     Route::get('petty-cash/transactions', [PettyCashController::class, 'transactions']);
     Route::get('petty-cash/transactions/pdf', [PettyCashController::class, 'transactionsPdf']);
     Route::post('petty-cash/expenses', [PettyCashController::class, 'storeExpense']);
-    Route::post('petty-cash/replenishments', [PettyCashController::class, 'storeReplenishment']);
     Route::delete('petty-cash/transactions/{pettyCashTransaction}', [PettyCashController::class, 'destroy']);
     Route::get('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'document']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'uploadDocument']);
     Route::delete('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'deleteDocument']);
-    Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/auditor', [PettyCashController::class, 'approveByAuditor']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/manager', [PettyCashController::class, 'approveByManager']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/reconcile', [PettyCashController::class, 'reconcile']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/notify', [PettyCashController::class, 'sendNotification']);
     Route::post('petty-cash/sync-expense-accounts', [PettyCashController::class, 'syncExpenseAccounts']);
     Route::post('petty-cash/import-whatsapp-requests', [PettyCashController::class, 'importWhatsAppRequests']);
+    Route::post('petty-cash/reconcile-pending', [PettyCashController::class, 'reconcilePending']);
 
     Route::get('whatsapp/phone-number', [WhatsAppController::class, 'phoneNumber']);
 

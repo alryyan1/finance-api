@@ -22,11 +22,10 @@ class SettingController extends Controller
         'journal_doctor_receivables_account_id',
         'journal_doctor_fees_expense_account_id',
         'petty_cash_manager_user_id',
-        'petty_cash_auditor_user_id',
         'petty_cash_manager_whatsapp_phone',
-        'petty_cash_auditor_whatsapp_phone',
         'petty_cash_notify_on_create',
-        'petty_cash_notify_recipients',
+        'petty_cash_cash_account_id',
+        'petty_cash_bank_account_id',
         'firebase_collection_name',
     ];
 
@@ -38,7 +37,11 @@ class SettingController extends Controller
 
     private const PETTY_CASH_INT_KEYS = [
         'petty_cash_manager_user_id',
-        'petty_cash_auditor_user_id',
+    ];
+
+    private const PETTY_CASH_ACCOUNT_INT_KEYS = [
+        'petty_cash_cash_account_id',
+        'petty_cash_bank_account_id',
     ];
 
     public function index(): JsonResponse
@@ -61,18 +64,23 @@ class SettingController extends Controller
             $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
         }
 
-        // Cast petty cash manager/auditor user ID keys from string to int|null
+        // Cast petty cash manager user ID key from string to int|null
         foreach (self::PETTY_CASH_INT_KEYS as $k) {
             $raw = $result[$k] ?? '';
             $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
         }
 
-        // Notify-on-create defaults to enabled, and recipients to "both", so
-        // installs that predate these settings keep the original always-send behavior.
+        // Cast petty cash cash/bank account ID keys from string to int|null
+        foreach (self::PETTY_CASH_ACCOUNT_INT_KEYS as $k) {
+            $raw = $result[$k] ?? '';
+            $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
+        }
+
+        // Notify-on-create defaults to enabled, so installs that predate this
+        // setting keep the original always-send behavior.
         $result['petty_cash_notify_on_create'] = $result['petty_cash_notify_on_create'] === ''
             ? true
             : filter_var($result['petty_cash_notify_on_create'], FILTER_VALIDATE_BOOLEAN);
-        $result['petty_cash_notify_recipients'] = $result['petty_cash_notify_recipients'] ?: 'both';
 
         return response()->json($result);
     }
@@ -90,11 +98,10 @@ class SettingController extends Controller
             'journal_doctor_receivables_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'journal_doctor_fees_expense_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'petty_cash_manager_user_id' => ['nullable', 'integer', 'exists:users,id'],
-            'petty_cash_auditor_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'petty_cash_manager_whatsapp_phone' => ['nullable', 'string', 'max:20'],
-            'petty_cash_auditor_whatsapp_phone' => ['nullable', 'string', 'max:20'],
             'petty_cash_notify_on_create' => ['nullable', 'boolean'],
-            'petty_cash_notify_recipients' => ['nullable', 'in:manager,auditor,both'],
+            'petty_cash_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'petty_cash_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'firebase_collection_name' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
         ]);
 
@@ -109,7 +116,7 @@ class SettingController extends Controller
             );
         }
 
-        $whatsappKeys = ['petty_cash_manager_whatsapp_phone', 'petty_cash_auditor_whatsapp_phone', 'firebase_collection_name'];
+        $whatsappKeys = ['petty_cash_manager_whatsapp_phone', 'firebase_collection_name'];
         if (array_intersect($whatsappKeys, array_keys($data)) !== []) {
             try {
                 $firestore->syncWhatsAppSenderConfig();

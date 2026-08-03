@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\FiscalYear;
 use App\Models\JournalEntry;
-use App\Models\PettyCashFund;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use App\Services\FirebaseStorageService;
@@ -22,76 +21,82 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class PettyCashController extends Controller
 {
-    public function fund(): JsonResponse
-    {
-        $fund = PettyCashFund::with('account:id,code,name')->first();
-
-        return response()->json($fund);
-    }
-
-    public function setupFund(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'custodian_name' => ['required', 'string', 'max:255'],
-            'account_id' => ['required', 'integer', 'exists:accounts,id'],
-            'max_amount' => ['required', 'numeric', 'min:0'],
-            'low_balance_threshold' => ['required', 'numeric', 'min:0'],
-            'status' => ['required', 'in:active,inactive'],
-        ]);
-
-        $fund = PettyCashFund::first();
-
-        if ($fund) {
-            $fund->update($data);
-        } else {
-            $fund = PettyCashFund::create([...$data, 'current_balance' => 0]);
-        }
-
-        return response()->json($fund->load('account:id,code,name'));
-    }
-
-    public function transactions(Request $request, PettyCashApprovalService $approval): JsonResponse
+    /**
+     * GET /petty-cash/transactions — paginates when `per_page` is given (the main
+     * grid); otherwise returns the full matching set (the spreadsheet/PDF exports,
+     * which need every row in the date range, not just one page).
+     */
+    public function transactions(Request $request): JsonResponse
     {
         $request->validate([
             'type' => ['nullable', 'in:expense,replenishment'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
+            'search' => ['nullable', 'string', 'max:255'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
-        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name'])
+        $query = PettyCashTransaction::with(['contraAccount:id,code,name', 'sourceAccount:id,code,name', 'createdBy:id,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
+            ->when($request->filled('search'), function ($q) use ($request) {
+                $term = trim((string) $request->string('search'));
+                $q->where(function ($q) use ($term) {
+                    $q->where('beneficiary_name', 'like', "%{$term}%")
+                        ->orWhere('description', 'like', "%{$term}%")
+                        ->orWhere('amount', 'like', "%{$term}%")
+                        ->orWhereHas('contraAccount', fn ($q) => $q->where('name', 'like', "%{$term}%"));
+                });
+            })
             ->orderByDesc('date')
-            ->orderByDesc('id')
+            ->orderByDesc('id');
+
+        if ($request->filled('per_page')) {
+            return response()->json($query->paginate($request->integer('per_page'))->withQueryString());
+        }
+
+        return response()->json($query->get());
+    }
+
+    /**
+     * POST /petty-cash/reconcile-pending — catch up MySQL for every still-pending
+     * expense against its Firestore mirror doc (approvals/receipts made via
+     * WhatsApp while nobody had the app open). Moved out of the list endpoint
+     * (which used to do this on every page load) so loading the page stays fast;
+     * the button that calls this lets the user pull the same catch-up on demand.
+     */
+    public function reconcilePending(PettyCashApprovalService $approval): JsonResponse
+    {
+        $pending = PettyCashTransaction::where('type', 'expense')
+            ->whereNull('manager_approved_at')
             ->get();
 
-        // Catch up any approvals or receipt attachments that happened via WhatsApp
-        // while nobody had the app open — best-effort, never lets a Firestore
-        // hiccup break the list. Scoped to expenses still missing an approval:
-        // once both auditor_approved_at and manager_approved_at are set there's
-        // nothing left on the mirror doc that could still change, so reconciling
-        // fully-approved history on every list load would make this scale with
-        // all-time transaction count instead of the current approval backlog.
-        $transactions = $transactions->map(function (PettyCashTransaction $t) use ($approval) {
-            if ($t->type !== 'expense' || ($t->auditor_approved_at && $t->manager_approved_at)) {
-                return $t;
-            }
+        $reconciledCount = 0;
 
+        foreach ($pending as $t) {
             try {
-                return $approval->reconcileFromFirestore($t);
+                $before = $t->manager_approved_at;
+                $t = $approval->reconcileFromFirestore($t);
+                if ($t->manager_approved_at !== $before) {
+                    $reconciledCount++;
+                }
             } catch (\Throwable $e) {
                 Log::error('Failed to reconcile petty cash approval from Firestore', [
                     'transaction_id' => $t->id,
                     'error' => $e->getMessage(),
                 ]);
-
-                return $t;
             }
-        });
+        }
 
-        return response()->json($transactions);
+        return response()->json([
+            'checked' => $pending->count(),
+            'reconciled' => $reconciledCount,
+            'message' => $reconciledCount > 0
+                ? "تمت مزامنة {$reconciledCount} من أصل {$pending->count()} مصروف معلّق."
+                : 'لا توجد اعتمادات جديدة عبر واتساب.',
+        ]);
     }
 
     /** POST /petty-cash/sync-expense-accounts — re-push the active expense account list to Firestore for the WhatsApp "new expense" flow. */
@@ -125,7 +130,7 @@ class PettyCashController extends Controller
             'to' => ['nullable', 'date'],
         ]);
 
-        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name'])
+        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'sourceAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
@@ -150,9 +155,9 @@ class PettyCashController extends Controller
 
         $pdf = PdfReport::make('حركات صندوق النثريات', $subtitle);
 
-        // Type, Date, Beneficiary, Contra account, Description, Amount — total = 190
-        $cols = [18, 22, 34, 40, 51, 25];
-        $pdf->tableHead(['النوع', 'التاريخ', 'المستفيد', 'الحساب المقابل', 'البيان', 'المبلغ'], $cols);
+        // Type, Date, Beneficiary, Contra account, Source account, Description, Amount — total = 190
+        $cols = [14, 20, 26, 32, 32, 46, 20];
+        $pdf->tableHead(['النوع', 'التاريخ', 'المستفيد', 'الحساب المقابل', 'الحساب الدائن', 'البيان', 'المبلغ'], $cols);
 
         $totalExpense = 0.0;
         $totalReplenishment = 0.0;
@@ -164,8 +169,9 @@ class PettyCashController extends Controller
             $pdf->Cell($cols[1], 7, $t->date->format('Y-m-d'), 1, 0, 'C', true);
             $pdf->Cell($cols[2], 7, $pdf->fit($t->beneficiary_name ?? '—', $cols[2] - 2), 1, 0, 'R', true);
             $pdf->Cell($cols[3], 7, $pdf->fit($t->contraAccount->name, $cols[3] - 2), 1, 0, 'R', true);
-            $pdf->Cell($cols[4], 7, $pdf->fit($t->description ?? '—', $cols[4] - 2), 1, 0, 'R', true);
-            $pdf->Cell($cols[5], 7, PdfReport::n($t->amount), 1, 1, 'C', true);
+            $pdf->Cell($cols[4], 7, $pdf->fit($t->sourceAccount->name ?? '—', $cols[4] - 2), 1, 0, 'R', true);
+            $pdf->Cell($cols[5], 7, $pdf->fit($t->description ?? '—', $cols[5] - 2), 1, 0, 'R', true);
+            $pdf->Cell($cols[6], 7, PdfReport::n($t->amount), 1, 1, 'C', true);
 
             if ($t->type === 'expense') {
                 $totalExpense += (float) $t->amount;
@@ -175,10 +181,10 @@ class PettyCashController extends Controller
             $odd = ! $odd;
         }
 
-        $labelW = $cols[0] + $cols[1] + $cols[2] + $cols[3] + $cols[4];
-        $pdf->totalsRow(['إجمالي المصروفات', PdfReport::n($totalExpense)], [$labelW, $cols[5]]);
-        $pdf->totalsRow(['إجمالي التغذية', PdfReport::n($totalReplenishment)], [$labelW, $cols[5]]);
-        $pdf->totalsRow(['صافي التغيير', PdfReport::n($totalReplenishment - $totalExpense)], [$labelW, $cols[5]]);
+        $labelW = $cols[0] + $cols[1] + $cols[2] + $cols[3] + $cols[4] + $cols[5];
+        $pdf->totalsRow(['إجمالي المصروفات', PdfReport::n($totalExpense)], [$labelW, $cols[6]]);
+        $pdf->totalsRow(['إجمالي التغذية', PdfReport::n($totalReplenishment)], [$labelW, $cols[6]]);
+        $pdf->totalsRow(['صافي التغيير', PdfReport::n($totalReplenishment - $totalExpense)], [$labelW, $cols[6]]);
 
         return $pdf->respond('petty-cash-transactions.pdf');
     }
@@ -190,20 +196,13 @@ class PettyCashController extends Controller
             'amount' => ['required', 'numeric', 'min:0.01'],
             'beneficiary_name' => ['nullable', 'string', 'max:255'],
             'contra_account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'source_account_id' => ['required', 'integer', 'exists:accounts,id'],
             'description' => ['nullable', 'string', 'max:500'],
             'document' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
         ]);
 
-        $fund = PettyCashFund::first();
-        abort_if(! $fund, 422, 'لم يتم إعداد صندوق النثريات بعد.');
-        abort_if($fund->status !== 'active', 422, 'صندوق النثريات غير مُفعّل.');
-
         if (FiscalYear::isDateLocked($data['date'])) {
             abort(422, 'هذه الفترة مغلقة ولا يمكن إضافة مصروف لها.');
-        }
-
-        if ((float) $data['amount'] > (float) $fund->current_balance) {
-            abort(422, 'رصيد الصندوق غير كافٍ لتغطية هذا المصروف.');
         }
 
         $documentPath = null;
@@ -213,9 +212,9 @@ class PettyCashController extends Controller
             $documentOriginalName = $request->file('document')->getClientOriginalName();
         }
 
-        $transaction = DB::transaction(function () use ($request, $data, $fund, $documentPath, $documentOriginalName) {
+        $transaction = DB::transaction(function () use ($request, $data, $documentPath, $documentOriginalName) {
             return PettyCashTransaction::create([
-                'fund_id' => $fund->id,
+                'source_account_id' => $data['source_account_id'],
                 'created_by_user_id' => $request->user()->id,
                 'type' => 'expense',
                 'status' => 'pending',
@@ -250,15 +249,15 @@ class PettyCashController extends Controller
         $notifications = $notifyOnCreate ? $whatsapp->sendApprovalNotifications($transaction) : [];
 
         return response()->json([
-            ...$transaction->load('contraAccount:id,code,name')->toArray(),
+            ...$transaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name'])->toArray(),
             'notifications' => $notifications,
         ], 201);
     }
 
     /**
      * (Re)send the WhatsApp approval-request template to the designated manager
-     * and auditor for a pending expense. Synchronous — the caller waits for both
-     * sends to complete (or fail) and shows the per-recipient result.
+     * for a pending expense. Synchronous — the caller waits for the send to
+     * complete (or fail) and shows the result.
      */
     public function sendNotification(PettyCashTransaction $pettyCashTransaction, WhatsAppService $whatsapp): JsonResponse
     {
@@ -270,71 +269,6 @@ class PettyCashController extends Controller
         ]);
     }
 
-    /**
-     * Record a replenishment of the petty cash fund from another account (e.g. bank or till).
-     *
-     * Creates a posted journal entry debiting the fund's account and crediting the
-     * contra account, then increments the fund's stored current_balance by the same
-     * amount. Unlike storeExpense, this does not require the fund to be active.
-     */
-    public function storeReplenishment(Request $request): JsonResponse
-    {
-        $data = $request->validate([
-            'date' => ['required', 'date'],
-            'amount' => ['required', 'numeric', 'min:0.01'],
-            'beneficiary_name' => ['nullable', 'string', 'max:255'],
-            'contra_account_id' => ['required', 'integer', 'exists:accounts,id'],
-            'description' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $fund = PettyCashFund::first();
-        abort_if(! $fund, 422, 'لم يتم إعداد صندوق النثريات بعد.');
-
-        if (FiscalYear::isDateLocked($data['date'])) {
-            abort(422, 'هذه الفترة مغلقة ولا يمكن إضافة تغذية لها.');
-        }
-
-        return DB::transaction(function () use ($data, $fund) {
-            $desc = $data['description'] ?? 'تغذية صندوق النثريات';
-
-            $entry = JournalEntry::create([
-                'date' => $data['date'],
-                'description' => $desc,
-                'is_posted' => true,
-            ]);
-
-            $entry->lines()->createMany([
-                [
-                    'account_id' => $fund->account_id,
-                    'debit' => $data['amount'],
-                    'credit' => 0,
-                    'description' => $desc,
-                ],
-                [
-                    'account_id' => $data['contra_account_id'],
-                    'debit' => 0,
-                    'credit' => $data['amount'],
-                    'description' => $desc,
-                ],
-            ]);
-
-            $transaction = PettyCashTransaction::create([
-                'fund_id' => $fund->id,
-                'type' => 'replenishment',
-                'date' => $data['date'],
-                'amount' => $data['amount'],
-                'beneficiary_name' => $data['beneficiary_name'] ?? null,
-                'contra_account_id' => $data['contra_account_id'],
-                'description' => $data['description'] ?? null,
-                'journal_entry_id' => $entry->id,
-            ]);
-
-            $fund->increment('current_balance', $data['amount']);
-
-            return response()->json($transaction->load('contraAccount:id,code,name'), 201);
-        });
-    }
-
     public function destroy(PettyCashTransaction $pettyCashTransaction, FirestoreApprovalService $firestore): JsonResponse
     {
         if (FiscalYear::isDateLocked($pettyCashTransaction->date->toDateString())) {
@@ -342,14 +276,6 @@ class PettyCashController extends Controller
         }
 
         DB::transaction(function () use ($pettyCashTransaction) {
-            $fund = $pettyCashTransaction->fund;
-
-            if ($pettyCashTransaction->type === 'expense' && $pettyCashTransaction->status === 'approved') {
-                $fund->increment('current_balance', $pettyCashTransaction->amount);
-            } elseif ($pettyCashTransaction->type === 'replenishment') {
-                $fund->decrement('current_balance', $pettyCashTransaction->amount);
-            }
-
             $entryId = $pettyCashTransaction->journal_entry_id;
             $documentPath = $pettyCashTransaction->document_path;
 
@@ -395,15 +321,7 @@ class PettyCashController extends Controller
     {
         $transaction = $service->reconcileFromFirestore($pettyCashTransaction);
 
-        return response()->json($transaction->load(['contraAccount:id,code,name', 'auditorApprovedBy:id,name', 'managerApprovedBy:id,name']));
-    }
-
-    public function approveByAuditor(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
-    {
-        $auditorId = (int) Setting::where('key', 'petty_cash_auditor_user_id')->value('value');
-        abort_if(! $auditorId || $request->user()->id !== $auditorId, 403, 'غير مصرح لك باعتماد هذا المصروف.');
-
-        return response()->json($service->approve($pettyCashTransaction, 'auditor', $auditorId));
+        return response()->json($transaction->load(['contraAccount:id,code,name', 'managerApprovedBy:id,name']));
     }
 
     public function approveByManager(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
@@ -411,7 +329,7 @@ class PettyCashController extends Controller
         $managerId = (int) Setting::where('key', 'petty_cash_manager_user_id')->value('value');
         abort_if(! $managerId || $request->user()->id !== $managerId, 403, 'غير مصرح لك باعتماد هذا المصروف.');
 
-        return response()->json($service->approve($pettyCashTransaction, 'manager', $managerId));
+        return response()->json($service->approve($pettyCashTransaction, $managerId));
     }
 
     public function uploadDocument(Request $request, PettyCashTransaction $pettyCashTransaction, FirebaseStorageService $storage, FirestoreApprovalService $firestore): JsonResponse
@@ -444,7 +362,7 @@ class PettyCashController extends Controller
             }
         }
 
-        return response()->json($pettyCashTransaction->load('contraAccount:id,code,name'));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name']));
     }
 
     /** DELETE /petty-cash/transactions/{id}/document — remove the attached receipt without replacing it. */
@@ -469,7 +387,7 @@ class PettyCashController extends Controller
             ]);
         }
 
-        return response()->json($pettyCashTransaction->load('contraAccount:id,code,name'));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'sourceAccount:id,code,name']));
     }
 
     /**

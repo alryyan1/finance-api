@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Account;
 use App\Models\FiscalYear;
 use App\Models\JournalEntry;
-use App\Models\PettyCashFund;
 use App\Models\PettyCashTransaction;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -22,18 +21,8 @@ class DashboardTest extends TestCase
         $fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
         $expenseAccount = Account::create(['code' => '501', 'name' => 'Office Supplies', 'type' => 'expense', 'is_active' => true]);
 
-        $lowFund = PettyCashFund::create([
-            'name' => 'Low Fund',
-            'custodian_name' => 'Custodian',
-            'account_id' => $fundAccount->id,
-            'max_amount' => 1000,
-            'low_balance_threshold' => 100,
-            'current_balance' => 50,
-            'status' => 'active',
-        ]);
-
         PettyCashTransaction::create([
-            'fund_id' => $lowFund->id,
+            'source_account_id' => $fundAccount->id,
             'type' => 'expense',
             'status' => 'pending',
             'date' => now()->toDateString(),
@@ -45,7 +34,6 @@ class DashboardTest extends TestCase
 
         FiscalYear::create([
             'name' => 'FY '.now()->year,
-            'period_type' => 'yearly',
             'start_date' => now()->startOfYear()->toDateString(),
             'end_date' => now()->endOfYear()->toDateString(),
             'status' => 'open',
@@ -54,10 +42,7 @@ class DashboardTest extends TestCase
         $response = $this->actingAs($user)->getJson('/api/dashboard');
 
         $response->assertOk()
-            ->assertJsonPath('petty_cash_funds.0.name', 'Low Fund')
-            ->assertJsonPath('petty_cash_funds.0.is_low', true)
             ->assertJsonPath('pending_approvals_count', 1)
-            ->assertJsonPath('awaiting_auditor_count', 1)
             ->assertJsonPath('awaiting_manager_count', 1)
             ->assertJsonPath('fiscal_year.status', 'open');
     }

@@ -51,41 +51,19 @@ class WhatsAppService
     }
 
     /**
-     * Send the approval-request template to the designated manager and/or
-     * auditor, synchronously, per the "petty_cash_notify_recipients" setting
-     * (manager, auditor, or both — defaults to both). Never throws — each
-     * recipient's outcome (sent, skipped because the role is excluded or its
-     * phone/template isn't configured, or failed with the underlying error) is
-     * reported back so the caller can show it to the user.
+     * Send the approval-request template to the designated manager,
+     * synchronously. Never throws — the outcome (sent, or skipped/failed with
+     * the underlying reason) is reported back so the caller can show it to the user.
      *
      * @return array<int, array{role: string, phone: string, template: string, status: string, error: ?string}>
      */
     public function sendApprovalNotifications(PettyCashTransaction $transaction): array
     {
-        $settings = Setting::whereIn('key', [
-            'petty_cash_manager_whatsapp_phone',
-            'petty_cash_auditor_whatsapp_phone',
-            'petty_cash_notify_recipients',
-        ])->pluck('value', 'key');
-
-        $recipients = $settings->get('petty_cash_notify_recipients') ?: 'both';
+        $phone = (string) Setting::where('key', 'petty_cash_manager_whatsapp_phone')->value('value');
 
         return [
-            $this->sendToRoleIfEnabled($transaction, 'manager', in_array($recipients, ['manager', 'both'], true), (string) $settings->get('petty_cash_manager_whatsapp_phone', ''), (string) config('services.whatsapp.manager_template')),
-            $this->sendToRoleIfEnabled($transaction, 'auditor', in_array($recipients, ['auditor', 'both'], true), (string) $settings->get('petty_cash_auditor_whatsapp_phone', ''), (string) config('services.whatsapp.auditor_template')),
+            $this->sendToRole($transaction, 'manager', $phone, (string) config('services.whatsapp.manager_template')),
         ];
-    }
-
-    /**
-     * @return array{role: string, phone: string, template: string, status: string, error: ?string}
-     */
-    private function sendToRoleIfEnabled(PettyCashTransaction $transaction, string $role, bool $enabled, string $phone, string $template): array
-    {
-        if (! $enabled) {
-            return ['role' => $role, 'phone' => $phone, 'template' => $template, 'status' => 'skipped', 'error' => 'إشعار واتساب لهذا الدور معطّل في الإعدادات.'];
-        }
-
-        return $this->sendToRole($transaction, $role, $phone, $template);
     }
 
     /**

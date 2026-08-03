@@ -3,7 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Account;
-use App\Models\PettyCashFund;
+use App\Models\JournalEntry;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use App\Models\User;
@@ -18,13 +18,11 @@ class PettyCashApprovalTest extends TestCase
 {
     use RefreshDatabase;
 
-    private User $auditor;
-
     private User $manager;
 
     private User $other;
 
-    private PettyCashFund $fund;
+    private Account $fundAccount;
 
     private Account $expenseAccount;
 
@@ -32,31 +30,21 @@ class PettyCashApprovalTest extends TestCase
     {
         parent::setUp();
 
-        $this->auditor = User::factory()->create();
         $this->manager = User::factory()->create();
         $this->other = User::factory()->create();
 
-        Setting::updateOrCreate(['key' => 'petty_cash_auditor_user_id'], ['value' => (string) $this->auditor->id]);
         Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $this->manager->id]);
 
-        $fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
+        $this->fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
         $this->expenseAccount = Account::create(['code' => '501', 'name' => 'Office Supplies', 'type' => 'expense', 'is_active' => true]);
 
-        $this->fund = PettyCashFund::create([
-            'name' => 'Main Fund',
-            'custodian_name' => 'Custodian',
-            'account_id' => $fundAccount->id,
-            'max_amount' => 1000,
-            'low_balance_threshold' => 100,
-            'current_balance' => 500,
-            'status' => 'active',
-        ]);
+        Setting::updateOrCreate(['key' => 'petty_cash_bank_account_id'], ['value' => (string) $this->fundAccount->id]);
     }
 
     private function createPendingExpense(float $amount = 100): PettyCashTransaction
     {
         return PettyCashTransaction::create([
-            'fund_id' => $this->fund->id,
+            'source_account_id' => $this->fundAccount->id,
             'type' => 'expense',
             'status' => 'pending',
             'date' => now()->toDateString(),
@@ -72,34 +60,16 @@ class PettyCashApprovalTest extends TestCase
             'date' => now()->toDateString(),
             'amount' => 50,
             'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
             'description' => 'Stationery',
         ]);
 
         $response->assertCreated();
         $response->assertJsonPath('status', 'pending');
         $response->assertJsonPath('journal_entry_id', null);
-
-        $this->assertSame('500.00', $this->fund->fresh()->current_balance);
     }
 
-    public function test_auditor_approval_alone_does_not_post_the_journal_entry(): void
-    {
-        $txn = $this->createPendingExpense();
-
-        $response = $this->actingAs($this->auditor)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor");
-
-        $response->assertOk();
-        $response->assertJsonPath('status', 'pending');
-
-        $txn->refresh();
-        $this->assertNotNull($txn->auditor_approved_at);
-        $this->assertNull($txn->manager_approved_at);
-        $this->assertNull($txn->journal_entry_id);
-        $this->assertSame('500.00', $this->fund->fresh()->current_balance);
-    }
-
-    public function test_manager_approval_alone_posts_journal_entry_and_deducts_balance(): void
+    public function test_manager_approval_posts_journal_entry(): void
     {
         $txn = $this->createPendingExpense(100);
 
@@ -110,71 +80,24 @@ class PettyCashApprovalTest extends TestCase
         $response->assertJsonPath('status', 'approved');
 
         $txn->refresh();
-        $this->assertNull($txn->auditor_approved_at);
         $this->assertNotNull($txn->manager_approved_at);
         $this->assertNotNull($txn->journal_entry_id);
-        $this->assertSame('400.00', $this->fund->fresh()->current_balance);
+
+        $entry = JournalEntry::find($txn->journal_entry_id);
+        $this->assertSame($this->expenseAccount->id, $entry->lines()->where('debit', '>', 0)->value('account_id'));
+        $this->assertSame($this->fundAccount->id, $entry->lines()->where('credit', '>', 0)->value('account_id'));
     }
 
-    public function test_both_approvals_post_journal_entry_and_deduct_balance(): void
+    public function test_reconcile_endpoint_applies_manager_approval_from_firestore(): void
     {
+        // A manager's WhatsApp-tap approval lands in Firestore first — the app
+        // must catch MySQL up (and post the journal entry) the next time
+        // anyone opens the Petty Cash page, without the manager ever visiting the app.
         $txn = $this->createPendingExpense(100);
-
-        $this->actingAs($this->auditor)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
-            ->assertOk();
-
-        $response = $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager");
-
-        $response->assertOk();
-        $response->assertJsonPath('status', 'approved');
-
-        $txn->refresh();
-        $this->assertNotNull($txn->journal_entry_id);
-        $this->assertSame('400.00', $this->fund->fresh()->current_balance);
-    }
-
-    public function test_auditor_approval_after_manager_does_not_double_post(): void
-    {
-        $txn = $this->createPendingExpense(100);
-
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
-            ->assertOk();
-
-        $journalEntryId = $txn->fresh()->journal_entry_id;
-        $this->assertSame('400.00', $this->fund->fresh()->current_balance);
-
-        $response = $this->actingAs($this->auditor)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor");
-
-        $response->assertOk();
-
-        $txn->refresh();
-        $this->assertNotNull($txn->auditor_approved_at);
-        $this->assertSame($journalEntryId, $txn->journal_entry_id);
-        $this->assertSame('400.00', $this->fund->fresh()->current_balance);
-    }
-
-    public function test_reconcile_endpoint_applies_auditor_approval_that_arrives_after_manager(): void
-    {
-        // Regression test: reconcileFromFirestore() used to bail out once status
-        // wasn't "pending" anymore, which the manager's own approval already flips —
-        // so an auditor tap landing afterward via WhatsApp never made it into MySQL.
-        $txn = $this->createPendingExpense(100);
-
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
-            ->assertOk();
-
-        $txn->refresh();
-        $this->assertSame('approved', $txn->status);
-        $this->assertNull($txn->auditor_approved_at);
 
         $this->mock(FirestoreApprovalService::class, function ($mock) use ($txn) {
-            $mock->shouldReceive('fetch')->with($txn->id)->andReturn(['auditor_approved' => true, 'manager_approved' => true]);
-            $mock->shouldReceive('markApproved')->with($txn->id, 'auditor')->once();
+            $mock->shouldReceive('fetch')->with($txn->id)->andReturn(['manager_approved' => true]);
+            $mock->shouldReceive('markApproved')->with($txn->id)->once();
         });
 
         $response = $this->actingAs($this->other)
@@ -184,7 +107,8 @@ class PettyCashApprovalTest extends TestCase
         $response->assertJsonPath('status', 'approved');
 
         $txn->refresh();
-        $this->assertNotNull($txn->auditor_approved_at);
+        $this->assertNotNull($txn->manager_approved_at);
+        $this->assertNotNull($txn->journal_entry_id);
         $this->assertSame('approved', $txn->status);
     }
 
@@ -297,32 +221,30 @@ class PettyCashApprovalTest extends TestCase
         $txn = $this->createPendingExpense();
 
         $this->actingAs($this->other)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
-            ->assertForbidden();
-
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
             ->assertForbidden();
     }
 
-    public function test_reapproving_same_role_is_idempotent(): void
+    public function test_reapproving_is_idempotent(): void
     {
         $txn = $this->createPendingExpense();
 
-        $this->actingAs($this->auditor)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
+        $this->actingAs($this->manager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
             ->assertOk();
 
-        $firstApprovedAt = $txn->fresh()->auditor_approved_at;
+        $firstApprovedAt = $txn->fresh()->manager_approved_at;
+        $firstJournalEntryId = $txn->fresh()->journal_entry_id;
 
-        $this->actingAs($this->auditor)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
+        $this->actingAs($this->manager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
             ->assertOk();
 
-        $this->assertTrue($firstApprovedAt->equalTo($txn->fresh()->auditor_approved_at));
+        $this->assertTrue($firstApprovedAt->equalTo($txn->fresh()->manager_approved_at));
+        $this->assertSame($firstJournalEntryId, $txn->fresh()->journal_entry_id);
     }
 
-    public function test_deleting_a_pending_expense_does_not_touch_the_balance(): void
+    public function test_deleting_a_pending_expense_removes_it(): void
     {
         $txn = $this->createPendingExpense(75);
 
@@ -330,24 +252,23 @@ class PettyCashApprovalTest extends TestCase
             ->deleteJson("/api/petty-cash/transactions/{$txn->id}")
             ->assertNoContent();
 
-        $this->assertSame('500.00', $this->fund->fresh()->current_balance);
         $this->assertDatabaseMissing('petty_cash_transactions', ['id' => $txn->id]);
     }
 
-    public function test_deleting_an_approved_expense_reverses_the_balance(): void
+    public function test_deleting_an_approved_expense_deletes_its_journal_entry(): void
     {
         $txn = $this->createPendingExpense(60);
 
-        $this->actingAs($this->auditor)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")->assertOk();
         $this->actingAs($this->manager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")->assertOk();
 
-        $this->assertSame('440.00', $this->fund->fresh()->current_balance);
+        $journalEntryId = $txn->fresh()->journal_entry_id;
+        $this->assertNotNull($journalEntryId);
 
         $this->actingAs($this->other)
             ->deleteJson("/api/petty-cash/transactions/{$txn->id}")
             ->assertNoContent();
 
-        $this->assertSame('500.00', $this->fund->fresh()->current_balance);
+        $this->assertDatabaseMissing('journal_entries', ['id' => $journalEntryId]);
     }
 
     public function test_document_can_be_uploaded_to_an_existing_transaction(): void
