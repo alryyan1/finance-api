@@ -25,7 +25,18 @@
       "mcp__firebase__firestore_list_documents",
       "mcp__firebase__firestore_delete_document",
       "mcp__firebase__firebase_read_resources",
-      "mcp__firebase__functions_list_functions"
+      "mcp__firebase__functions_list_functions",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"https://us-central1-sales-9e9b8.cloudfunctions.net/pettyCashWebhook\")",
+      "mcp__firebase__firestore_list_collections",
+      "Bash(curl -s -X POST \"https://us-central1-sales-9e9b8.cloudfunctions.net/pettyCashWebhook?probe=DEPLOY_PROBE_V3\" -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\")",
+      "Bash(curl -s -X POST \"https://us-central1-sales-9e9b8.cloudfunctions.net/pettyCashWebhook?probe=DEPLOY_PROBE_V3\" -H \"Content-Type: application/json\" -d '{}' -w \"\\\\nHTTP_STATUS:%{http_code}\\\\n\")",
+      "Bash(npm uninstall *)",
+      "Bash(git status *)",
+      "Bash(ls \"c:\\\\xampp\\\\htdocs\\\\finance\\\\src\\\\pages\" | grep -i journal; grep -n \"route\" -i \"c:\\\\xampp\\\\htdocs\\\\finance\\\\src\\\\pages\\\\..\\\\App.tsx\" 2>/dev/null | head -50)",
+      "Read(//c/xampp/htdocs/finance/src/**)",
+      "mcp__laravel-boost__browser-logs",
+      "Bash(kill 1537)",
+      "Bash(kill 1528)"
     ]
   }
 }

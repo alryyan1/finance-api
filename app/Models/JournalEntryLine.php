@@ -10,13 +10,18 @@ class JournalEntryLine extends Model
     protected $fillable = ['journal_entry_id', 'account_id', 'party_id', 'description', 'debit', 'credit'];
 
     protected $casts = [
-        'debit'  => 'decimal:2',
+        'debit' => 'decimal:2',
         'credit' => 'decimal:2',
     ];
 
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    public function journalEntry(): BelongsTo
+    {
+        return $this->belongsTo(JournalEntry::class);
     }
 
     public function party(): BelongsTo
