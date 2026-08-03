@@ -59,15 +59,6 @@ class PettyCashController extends Controller
             'to' => ['nullable', 'date'],
         ]);
 
-        // Import any "new expense" requests submitted via the WhatsApp Flow ("إذن
-        // جديد") since the last time this list loaded — best-effort, so it never
-        // breaks the list itself.
-        try {
-            $approval->importPendingWhatsAppRequests();
-        } catch (\Throwable $e) {
-            Log::error('Failed to import pending WhatsApp petty cash requests', ['error' => $e->getMessage()]);
-        }
-
         $transactions = PettyCashTransaction::with(['contraAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
@@ -78,9 +69,13 @@ class PettyCashController extends Controller
 
         // Catch up any approvals or receipt attachments that happened via WhatsApp
         // while nobody had the app open — best-effort, never lets a Firestore
-        // hiccup break the list.
+        // hiccup break the list. Scoped to expenses still missing an approval:
+        // once both auditor_approved_at and manager_approved_at are set there's
+        // nothing left on the mirror doc that could still change, so reconciling
+        // fully-approved history on every list load would make this scale with
+        // all-time transaction count instead of the current approval backlog.
         $transactions = $transactions->map(function (PettyCashTransaction $t) use ($approval) {
-            if ($t->type !== 'expense') {
+            if ($t->type !== 'expense' || ($t->auditor_approved_at && $t->manager_approved_at)) {
                 return $t;
             }
 
@@ -105,6 +100,21 @@ class PettyCashController extends Controller
         $firestore->syncExpenseAccounts();
 
         return response()->json(['message' => 'تم مزامنة قائمة الحسابات مع واتساب.']);
+    }
+
+    /**
+     * POST /petty-cash/import-whatsapp-requests — manually pull in any pending
+     * "new expense" requests submitted via the WhatsApp Flow, instead of waiting
+     * for the next transactions list load to import them automatically.
+     */
+    public function importWhatsAppRequests(PettyCashApprovalService $approval): JsonResponse
+    {
+        $count = $approval->importPendingWhatsAppRequests();
+
+        return response()->json([
+            'imported' => $count,
+            'message' => $count > 0 ? "تم استيراد {$count} طلب من واتساب." : 'لا توجد طلبات جديدة من واتساب.',
+        ]);
     }
 
     public function transactionsPdf(Request $request): Response

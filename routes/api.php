@@ -75,6 +75,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('petty-cash/transactions/{pettyCashTransaction}/reconcile', [PettyCashController::class, 'reconcile']);
     Route::post('petty-cash/transactions/{pettyCashTransaction}/notify', [PettyCashController::class, 'sendNotification']);
     Route::post('petty-cash/sync-expense-accounts', [PettyCashController::class, 'syncExpenseAccounts']);
+    Route::post('petty-cash/import-whatsapp-requests', [PettyCashController::class, 'importWhatsAppRequests']);
 
     Route::get('whatsapp/phone-number', [WhatsAppController::class, 'phoneNumber']);
 

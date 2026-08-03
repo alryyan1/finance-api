@@ -171,12 +171,18 @@ class PettyCashApprovalService
      * Best-effort per request: one that fails validation is dropped (its
      * Firestore doc removed) and the submitter is told why over WhatsApp,
      * rather than blocking every subsequent list load retrying it forever.
+     *
+     * @return int number of pending requests found and processed
      */
-    public function importPendingWhatsAppRequests(): void
+    public function importPendingWhatsAppRequests(): int
     {
-        foreach ($this->firestore->fetchPendingWhatsAppRequests() as $request) {
+        $requests = $this->firestore->fetchPendingWhatsAppRequests();
+
+        foreach ($requests as $request) {
             $this->importOneWhatsAppRequest($request);
         }
+
+        return count($requests);
     }
 
     /**
