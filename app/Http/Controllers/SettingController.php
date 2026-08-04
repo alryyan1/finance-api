@@ -125,6 +125,15 @@ class SettingController extends Controller
             }
         }
 
+        $pettyCashAccountKeys = ['petty_cash_bank_account_id', 'petty_cash_cash_account_id'];
+        if (array_intersect($pettyCashAccountKeys, array_keys($data)) !== []) {
+            try {
+                $firestore->syncPettyCashAccounts();
+            } catch (\Throwable $e) {
+                Log::error('Failed to sync petty cash credit accounts to Firestore', ['error' => $e->getMessage()]);
+            }
+        }
+
         return $this->index();
     }
 

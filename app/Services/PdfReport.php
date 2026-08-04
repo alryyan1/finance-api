@@ -37,7 +37,7 @@ class PdfReport extends TCPDF
     {
         $company = $this->reportCompany;
         $logoPath = $company['_logo_path'] ?? null;
-        $logoPos = $company['logo_position'] ?: 'right';
+        $logoPos = ! empty($company['logo_position']) ? $company['logo_position'] : 'right';
 
         $pageW = $this->getPageWidth();
         $lM = $this->lMargin;
@@ -242,7 +242,7 @@ class PdfReport extends TCPDF
 
         // Dynamic top margin: larger when a logo is present
         $hasLogo = $company['_logo_path'] !== null;
-        $logoPos = $company['logo_position'] ?: 'right';
+        $logoPos = ! empty($company['logo_position']) ? $company['logo_position'] : 'right';
         $topMargin = match (true) {
             $hasLogo && $logoPos === 'full' => 68,
             $hasLogo => 55,
@@ -256,7 +256,7 @@ class PdfReport extends TCPDF
         $pdf->SetHeaderMargin(5);
         $pdf->SetFooterMargin(10);
         $pdf->SetAutoPageBreak(true, 20);
-        $pdf->SetRTL(false);
+        $pdf->SetRTL(true);
         $pdf->setup($company, $title, $sub);
         $pdf->AddPage();
         $pdf->SetFont('arial', '', 9);

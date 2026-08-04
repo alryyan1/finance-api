@@ -10,14 +10,19 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class JournalEntryController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'from'   => ['nullable', 'date'],
-            'to'     => ['nullable', 'date'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
             'search' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', 'in:all,posted,draft'],
         ]);
@@ -41,8 +46,12 @@ class JournalEntryController extends Controller
             });
         }
         if ($status = $request->input('status')) {
-            if ($status === 'posted') $q->where('is_posted', true);
-            if ($status === 'draft')  $q->where('is_posted', false);
+            if ($status === 'posted') {
+                $q->where('is_posted', true);
+            }
+            if ($status === 'draft') {
+                $q->where('is_posted', false);
+            }
         }
 
         return response()->json($q->get());
@@ -58,15 +67,15 @@ class JournalEntryController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'date'                => ['required', 'date'],
-            'reference'           => ['nullable', 'string', 'max:50'],
-            'description'         => ['required', 'string', 'max:500'],
-            'lines'               => ['required', 'array', 'min:2'],
-            'lines.*.account_id'  => ['required', 'integer', 'exists:accounts,id'],
-            'lines.*.party_id'    => ['nullable', 'integer', 'exists:parties,id'],
+            'date' => ['required', 'date'],
+            'reference' => ['nullable', 'string', 'max:50'],
+            'description' => ['required', 'string', 'max:500'],
+            'lines' => ['required', 'array', 'min:2'],
+            'lines.*.account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'lines.*.party_id' => ['nullable', 'integer', 'exists:parties,id'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
-            'lines.*.debit'       => ['required', 'numeric', 'min:0'],
-            'lines.*.credit'      => ['required', 'numeric', 'min:0'],
+            'lines.*.debit' => ['required', 'numeric', 'min:0'],
+            'lines.*.credit' => ['required', 'numeric', 'min:0'],
         ]);
 
         $this->assertBalanced($data['lines']);
@@ -77,6 +86,7 @@ class JournalEntryController extends Controller
             foreach ($data['lines'] as $line) {
                 $entry->lines()->create($line);
             }
+
             return $entry;
         });
 
@@ -93,15 +103,15 @@ class JournalEntryController extends Controller
         }
 
         $data = $request->validate([
-            'date'                => ['required', 'date'],
-            'reference'           => ['nullable', 'string', 'max:50'],
-            'description'         => ['required', 'string', 'max:500'],
-            'lines'               => ['required', 'array', 'min:2'],
-            'lines.*.account_id'  => ['required', 'integer', 'exists:accounts,id'],
-            'lines.*.party_id'    => ['nullable', 'integer', 'exists:parties,id'],
+            'date' => ['required', 'date'],
+            'reference' => ['nullable', 'string', 'max:50'],
+            'description' => ['required', 'string', 'max:500'],
+            'lines' => ['required', 'array', 'min:2'],
+            'lines.*.account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'lines.*.party_id' => ['nullable', 'integer', 'exists:parties,id'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
-            'lines.*.debit'       => ['required', 'numeric', 'min:0'],
-            'lines.*.credit'      => ['required', 'numeric', 'min:0'],
+            'lines.*.debit' => ['required', 'numeric', 'min:0'],
+            'lines.*.credit' => ['required', 'numeric', 'min:0'],
         ]);
 
         $this->assertBalanced($data['lines']);
@@ -153,20 +163,20 @@ class JournalEntryController extends Controller
 
         $reversal = DB::transaction(function () use ($journalEntry) {
             $reversal = JournalEntry::create([
-                'date'        => now()->toDateString(),
-                'reference'   => 'REV-' . $journalEntry->id,
-                'description' => 'عكس: ' . $journalEntry->description,
-                'is_posted'   => true,
+                'date' => now()->toDateString(),
+                'reference' => 'REV-'.$journalEntry->id,
+                'description' => 'عكس: '.$journalEntry->description,
+                'is_posted' => true,
                 'reversal_of' => $journalEntry->id,
             ]);
 
             foreach ($journalEntry->lines as $line) {
                 $reversal->lines()->create([
-                    'account_id'  => $line->account_id,
-                    'party_id'    => $line->party_id,
+                    'account_id' => $line->account_id,
+                    'party_id' => $line->party_id,
                     'description' => $line->description,
-                    'debit'       => $line->credit,   // swap
-                    'credit'      => $line->debit,    // swap
+                    'debit' => $line->credit,   // swap
+                    'credit' => $line->debit,    // swap
                 ]);
             }
 
@@ -184,8 +194,8 @@ class JournalEntryController extends Controller
     public function listPdf(Request $request): Response
     {
         $request->validate([
-            'from'   => ['nullable', 'date'],
-            'to'     => ['nullable', 'date'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
             'search' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', 'in:all,posted,draft'],
         ]);
@@ -194,40 +204,53 @@ class JournalEntryController extends Controller
             ->orderBy('date')
             ->orderBy('id');
 
-        if ($from = $request->input('from')) $q->where('date', '>=', $from);
-        if ($to   = $request->input('to'))   $q->where('date', '<=', $to);
+        if ($from = $request->input('from')) {
+            $q->where('date', '>=', $from);
+        }
+        if ($to = $request->input('to')) {
+            $q->where('date', '<=', $to);
+        }
         if ($search = $request->input('search')) {
-            $q->where(fn ($s) =>
-                $s->where('description', 'like', "%{$search}%")
-                  ->orWhere('reference',   'like', "%{$search}%")
+            $q->where(fn ($s) => $s->where('description', 'like', "%{$search}%")
+                ->orWhere('reference', 'like', "%{$search}%")
             );
         }
         if ($status = $request->input('status')) {
-            if ($status === 'posted') $q->where('is_posted', true);
-            if ($status === 'draft')  $q->where('is_posted', false);
+            if ($status === 'posted') {
+                $q->where('is_posted', true);
+            }
+            if ($status === 'draft') {
+                $q->where('is_posted', false);
+            }
         }
 
         $entries = $q->get();
 
         // Build subtitle
         $parts = [];
-        if ($from && $to) $parts[] = "الفترة من {$from} إلى {$to}";
-        elseif ($from)    $parts[] = "من {$from}";
-        elseif ($to)      $parts[] = "إلى {$to}";
-        if ($search)      $parts[] = "بحث: {$search}";
+        if ($from && $to) {
+            $parts[] = "الفترة من {$from} إلى {$to}";
+        } elseif ($from) {
+            $parts[] = "من {$from}";
+        } elseif ($to) {
+            $parts[] = "إلى {$to}";
+        }
+        if ($search) {
+            $parts[] = "بحث: {$search}";
+        }
         $subtitle = implode('   |   ', $parts) ?: 'جميع القيود';
 
-        $pdf  = PdfReport::make('دفتر اليومية', $subtitle);
+        $pdf = PdfReport::make('دفتر اليومية', $subtitle);
         // #, Code, Account, Party, LineDesc, Debit, Credit  — total = 190
         $cols = [10, 18, 50, 26, 38, 24, 24];
 
-        $grandDebit  = 0.0;
+        $grandDebit = 0.0;
         $grandCredit = 0.0;
 
         foreach ($entries as $entry) {
-            $totalDebit  = $entry->lines->sum(fn ($l) => (float) $l->debit);
+            $totalDebit = $entry->lines->sum(fn ($l) => (float) $l->debit);
             $totalCredit = $entry->lines->sum(fn ($l) => (float) $l->credit);
-            $grandDebit  += $totalDebit;
+            $grandDebit += $totalDebit;
             $grandCredit += $totalCredit;
 
             // ── Entry header bar (two halves so description can't overflow) ───
@@ -235,12 +258,12 @@ class JournalEntryController extends Controller
             $pdf->SetFillColor(91, 33, 182);
             $pdf->SetTextColor(255, 255, 255);
             $statusLabel = $entry->is_posted ? 'مرحَّل' : 'مسودة';
-            $ref         = $entry->reference ? "  ({$entry->reference})" : '';
-            $meta        = "#{$entry->id}   {$entry->date}   {$statusLabel}{$ref}   —   ";
-            $metaW       = $pdf->GetStringWidth($meta);
-            $descW       = 190 - $metaW - 2;
-            $desc        = $pdf->fit($entry->description, max($descW, 20));
-            $pdf->Cell(190, 7, $meta . $desc, 0, 1, 'R', true);
+            $ref = $entry->reference ? "  ({$entry->reference})" : '';
+            $meta = "#{$entry->id}   {$entry->date}   {$statusLabel}{$ref}   —   ";
+            $metaW = $pdf->GetStringWidth($meta);
+            $descW = 190 - $metaW - 2;
+            $desc = $pdf->fit($entry->description, max($descW, 20));
+            $pdf->Cell(190, 7, $meta.$desc, 0, 1, 'R', true);
             $pdf->SetTextColor(0, 0, 0);
 
             // ── Lines table ───────────────────────────────────────────────────
@@ -251,16 +274,16 @@ class JournalEntryController extends Controller
             foreach ($entry->lines as $i => $line) {
                 $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
                 $pdf->SetFont('arial', '', 8);
-                $debit  = (float) $line->debit  > 0 ? PdfReport::n($line->debit)  : '—';
+                $debit = (float) $line->debit > 0 ? PdfReport::n($line->debit) : '—';
                 $credit = (float) $line->credit > 0 ? PdfReport::n($line->credit) : '—';
-                $pdf->Cell($cols[0], 6, (string) ($i + 1),                              1, 0, 'C', true);
+                $pdf->Cell($cols[0], 6, (string) ($i + 1), 1, 0, 'C', true);
                 $pdf->Cell($cols[1], 6, $pdf->fit($line->account->code ?? '', $cols[1]), 1, 0, 'C', true);
                 $pdf->Cell($cols[2], 6, $pdf->fit($line->account->name ?? '', $cols[2]), 1, 0, 'R', true);
-                $pdf->Cell($cols[3], 6, $pdf->fit($line->party->name   ?? '—', $cols[3]),1, 0, 'R', true);
-                $pdf->Cell($cols[4], 6, $pdf->fit($line->description   ?? '', $cols[4]), 1, 0, 'R', true);
-                $pdf->Cell($cols[5], 6, $debit,                                          1, 0, 'C', true);
-                $pdf->Cell($cols[6], 6, $credit,                                         1, 1, 'C', true);
-                $odd = !$odd;
+                $pdf->Cell($cols[3], 6, $pdf->fit($line->party->name ?? '—', $cols[3]), 1, 0, 'R', true);
+                $pdf->Cell($cols[4], 6, $pdf->fit($line->description ?? '', $cols[4]), 1, 0, 'R', true);
+                $pdf->Cell($cols[5], 6, $debit, 1, 0, 'C', true);
+                $pdf->Cell($cols[6], 6, $credit, 1, 1, 'C', true);
+                $odd = ! $odd;
             }
 
             $pdf->totalsRow(
@@ -276,7 +299,7 @@ class JournalEntryController extends Controller
             $pdf->SetFillColor(30, 64, 175);
             $pdf->SetTextColor(255, 255, 255);
             $pdf->Cell(190, 7,
-                'الإجمالي الكلي   مدين: ' . PdfReport::n($grandDebit) . '   دائن: ' . PdfReport::n($grandCredit),
+                'الإجمالي الكلي   مدين: '.PdfReport::n($grandDebit).'   دائن: '.PdfReport::n($grandCredit),
                 0, 1, 'C', true
             );
             $pdf->SetTextColor(0, 0, 0);
@@ -285,12 +308,120 @@ class JournalEntryController extends Controller
         return $pdf->respond('journal-entries.pdf');
     }
 
+    public function listExcel(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+            'search' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'in:all,posted,draft'],
+        ]);
+
+        $q = JournalEntry::with('lines.account:id,code,name', 'lines.party:id,name')
+            ->orderBy('date')
+            ->orderBy('id');
+
+        if ($from = $request->input('from')) {
+            $q->where('date', '>=', $from);
+        }
+        if ($to = $request->input('to')) {
+            $q->where('date', '<=', $to);
+        }
+        if ($search = $request->input('search')) {
+            $q->where(fn ($s) => $s->where('description', 'like', "%{$search}%")
+                ->orWhere('reference', 'like', "%{$search}%")
+            );
+        }
+        if ($status = $request->input('status')) {
+            if ($status === 'posted') {
+                $q->where('is_posted', true);
+            }
+            if ($status === 'draft') {
+                $q->where('is_posted', false);
+            }
+        }
+
+        $entries = $q->get();
+
+        $headers = ['رقم القيد', 'التاريخ', 'المرجع', 'الحالة', 'بيان القيد', 'الرمز', 'اسم الحساب', 'الجهة', 'بيان السطر', 'مدين', 'دائن'];
+
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle('دفتر اليومية');
+        $sheet->setRightToLeft(true);
+        $sheet->fromArray($headers, null, 'A1');
+
+        $lastCol = 'K';
+        $sheet->getStyle("A1:{$lastCol}1")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1565C0']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $row = 2;
+        $grandDebit = 0.0;
+        $grandCredit = 0.0;
+
+        foreach ($entries as $entry) {
+            $statusLabel = $entry->is_posted ? 'مرحَّل' : 'مسودة';
+
+            foreach ($entry->lines as $line) {
+                $sheet->fromArray([
+                    $entry->id,
+                    $entry->date->format('Y-m-d'),
+                    $entry->reference ?? '',
+                    $statusLabel,
+                    $entry->description,
+                    $line->account->code ?? '',
+                    $line->account->name ?? '',
+                    $line->party->name ?? '',
+                    $line->description ?? '',
+                    (float) $line->debit,
+                    (float) $line->credit,
+                ], null, "A{$row}");
+
+                $grandDebit += (float) $line->debit;
+                $grandCredit += (float) $line->credit;
+                $row++;
+            }
+        }
+
+        $lastDataRow = $row - 1;
+        if ($lastDataRow >= 2) {
+            $sheet->getStyle("A2:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("J2:K{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+        }
+
+        $row++;
+        $sheet->setCellValue("I{$row}", 'الإجمالي');
+        $sheet->setCellValue("J{$row}", $grandDebit);
+        $sheet->setCellValue("K{$row}", $grandCredit);
+        $sheet->getStyle("I{$row}:K{$row}")->applyFromArray([
+            'font' => ['bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
+        ]);
+        $sheet->getStyle("J{$row}:K{$row}")->getNumberFormat()->setFormatCode('#,##0');
+
+        foreach (range('A', $lastCol) as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+
+        $writer = new Xlsx($spreadsheet);
+        $filename = 'journal-entries.xlsx';
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
+    }
+
     public function voucher(JournalEntry $journalEntry): Response
     {
         $entry = $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name');
 
         $status = $entry->is_posted ? 'مرحَّل' : 'مسودة';
-        $pdf    = PdfReport::make(
+        $pdf = PdfReport::make(
             'سند قيد يومي',
             "رقم: {$entry->id}   |   التاريخ: {$entry->date}   |   الحالة: {$status}"
         );
@@ -298,30 +429,30 @@ class JournalEntryController extends Controller
         // Info box
         $pdf->SetFont('arial', '', 9);
         if ($entry->reference) {
-            $pdf->Cell(190, 7, 'المرجع: ' . $entry->reference, 0, 1, 'R');
+            $pdf->Cell(190, 7, 'المرجع: '.$entry->reference, 0, 1, 'R');
         }
         $pdf->SetFont('arialbd', '', 10);
-        $pdf->Cell(190, 8, 'البيان: ' . $entry->description, 'B', 1, 'R');
+        $pdf->Cell(190, 8, 'البيان: '.$entry->description, 'B', 1, 'R');
         $pdf->Ln(4);
 
         // Lines table
-        $cols   = [10, 20, 70, 45, 45];  // #, Code, Account, Debit, Credit
+        $cols = [10, 20, 70, 45, 45];  // #, Code, Account, Debit, Credit
         $pdf->tableHead(['#', 'الرمز', 'اسم الحساب', 'مدين', 'دائن'], $cols);
 
         $odd = false;
         foreach ($entry->lines as $i => $line) {
             $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
-            $debit  = (float) $line->debit  > 0 ? PdfReport::n($line->debit)  : '—';
+            $debit = (float) $line->debit > 0 ? PdfReport::n($line->debit) : '—';
             $credit = (float) $line->credit > 0 ? PdfReport::n($line->credit) : '—';
-            $pdf->Cell($cols[0], 7, (string) ($i + 1),          1, 0, 'C', true);
-            $pdf->Cell($cols[1], 7, $line->account->code,        1, 0, 'C', true);
-            $pdf->Cell($cols[2], 7, $line->account->name,        1, 0, 'R', true);
-            $pdf->Cell($cols[3], 7, $debit,                      1, 0, 'C', true);
-            $pdf->Cell($cols[4], 7, $credit,                     1, 1, 'C', true);
-            $odd = !$odd;
+            $pdf->Cell($cols[0], 7, (string) ($i + 1), 1, 0, 'C', true);
+            $pdf->Cell($cols[1], 7, $line->account->code, 1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, $line->account->name, 1, 0, 'R', true);
+            $pdf->Cell($cols[3], 7, $debit, 1, 0, 'C', true);
+            $pdf->Cell($cols[4], 7, $credit, 1, 1, 'C', true);
+            $odd = ! $odd;
         }
 
-        $totalDebit  = $entry->lines->sum(fn ($l) => (float) $l->debit);
+        $totalDebit = $entry->lines->sum(fn ($l) => (float) $l->debit);
         $totalCredit = $entry->lines->sum(fn ($l) => (float) $l->credit);
         $pdf->totalsRow(
             ['', '', 'الإجمالي', PdfReport::n($totalDebit), PdfReport::n($totalCredit)],
@@ -344,7 +475,7 @@ class JournalEntryController extends Controller
 
     private function assertBalanced(array $lines): void
     {
-        $debit  = collect($lines)->sum('debit');
+        $debit = collect($lines)->sum('debit');
         $credit = collect($lines)->sum('credit');
 
         if (abs($debit - $credit) > 0.005) {

@@ -10,8 +10,8 @@ class OpeningBalance extends Model
     protected $fillable = ['fiscal_year_id', 'account_id', 'debit', 'credit'];
 
     protected $casts = [
-        'debit'          => 'decimal:2',
-        'credit'         => 'decimal:2',
+        'debit' => 'integer',
+        'credit' => 'integer',
         'fiscal_year_id' => 'integer',
     ];
 

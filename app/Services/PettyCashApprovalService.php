@@ -171,7 +171,15 @@ class PettyCashApprovalService
         $phone = (string) ($request['submitted_by_phone'] ?? '');
 
         try {
-            $sourceAccountId = (int) Setting::where('key', 'petty_cash_bank_account_id')->value('value');
+            $bankAccountId = (int) Setting::where('key', 'petty_cash_bank_account_id')->value('value');
+            $cashAccountId = (int) Setting::where('key', 'petty_cash_cash_account_id')->value('value');
+            $configuredAccountIds = array_filter([$bankAccountId, $cashAccountId]);
+
+            $requestedCreditAccountId = (int) ($request['credit_account_id'] ?? 0);
+            $sourceAccountId = in_array($requestedCreditAccountId, $configuredAccountIds, true)
+                ? $requestedCreditAccountId
+                : $bankAccountId;
+
             if (! $sourceAccountId) {
                 throw new \RuntimeException('لم يتم إعداد حساب البنك لصندوق النثريات بعد.');
             }

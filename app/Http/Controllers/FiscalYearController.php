@@ -53,7 +53,15 @@ class FiscalYearController extends Controller
             return response()->json(['message' => 'تتداخل مع فترة مالية موجودة'], 422);
         }
 
-        return response()->json(FiscalYear::create($data), 201);
+        $fiscalYear = DB::transaction(function () use ($data) {
+            $fiscalYear = FiscalYear::create($data);
+
+            $this->carryForwardFromPrecedingClosedYear($fiscalYear);
+
+            return $fiscalYear;
+        });
+
+        return response()->json($fiscalYear, 201);
     }
 
     public function bulkMonths(Request $request): JsonResponse
@@ -88,12 +96,13 @@ class FiscalYearController extends Controller
                     continue;
                 }
 
-                FiscalYear::create([
+                $fiscalYear = FiscalYear::create([
                     'name' => $arabicMonths[$m].' '.$year,
                     'start_date' => $start,
                     'end_date' => $end,
                     'status' => 'open',
                 ]);
+                $this->carryForwardFromPrecedingClosedYear($fiscalYear);
                 $created++;
             }
         });
@@ -241,6 +250,25 @@ class FiscalYearController extends Controller
 
     // ─────────────────────────── Private helpers ────────────────────────────
 
+    /**
+     * When a new fiscal year is created after its immediately preceding
+     * period has already been closed, carry-forward never ran for it
+     * (close() only carries forward into a next period that exists at
+     * that moment). Re-run it now so the new period's opening balances
+     * aren't silently left empty.
+     */
+    private function carryForwardFromPrecedingClosedYear(FiscalYear $fiscalYear): void
+    {
+        $preceding = FiscalYear::where('status', 'closed')
+            ->where('end_date', '<', $fiscalYear->start_date->toDateString())
+            ->orderByDesc('end_date')
+            ->first();
+
+        if ($preceding) {
+            $this->carryForwardBalances($preceding);
+        }
+    }
+
     private function carryForwardBalances(FiscalYear $fiscalYear): ?FiscalYear
     {
         $nextYear = FiscalYear::where('start_date', '>', $fiscalYear->end_date->toDateString())
@@ -292,8 +320,8 @@ class FiscalYearController extends Controller
                 OpeningBalance::create([
                     'fiscal_year_id' => $nextYear->id,
                     'account_id' => $accountId,
-                    'debit' => round($debit, 2),
-                    'credit' => round($credit, 2),
+                    'debit' => (int) round($debit),
+                    'credit' => (int) round($credit),
                 ]);
             }
         }

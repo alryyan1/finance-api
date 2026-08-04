@@ -123,6 +123,29 @@ class FirestoreApprovalService
     }
 
     /**
+     * Mirrors the two configured petty cash funding accounts (bank + cash) into
+     * Firestore the same way expense accounts are — read by the pettyCashWebhook
+     * Cloud Function to populate the "من حساب" dropdown on the "new expense"
+     * WhatsApp Flow. Called whenever those settings are saved, or via the manual
+     * "sync accounts" button (folded into syncExpenseAccounts()'s trigger).
+     */
+    public function syncPettyCashAccounts(): void
+    {
+        $bankAccountId = (int) Setting::where('key', 'petty_cash_bank_account_id')->value('value');
+        $cashAccountId = (int) Setting::where('key', 'petty_cash_cash_account_id')->value('value');
+
+        $accounts = Account::whereIn('id', array_filter([$bankAccountId, $cashAccountId]))
+            ->get(['id', 'code', 'name'])
+            ->map(fn (Account $a) => ['id' => (string) $a->id, 'title' => $a->name])
+            ->values()
+            ->all();
+
+        $this->patch($this->creditAccountsPath(), [
+            'accounts_json' => json_encode($accounts),
+        ]);
+    }
+
+    /**
      * Reads back the "new expense" requests submitted through the WhatsApp Flow
      * (petty_cash_new_expense_request) — written by the Cloud Function under
      * finance/{collectionName}/whatsapp_new_requests, one doc per submission.
@@ -257,6 +280,13 @@ class FirestoreApprovalService
         $projectId = config('services.firebase.project_id');
 
         return "projects/{$projectId}/databases/(default)/documents/finance/{$this->collectionName()}/whatsapp_expense_accounts/config";
+    }
+
+    private function creditAccountsPath(): string
+    {
+        $projectId = config('services.firebase.project_id');
+
+        return "projects/{$projectId}/databases/(default)/documents/finance/{$this->collectionName()}/whatsapp_credit_accounts/config";
     }
 
     /**

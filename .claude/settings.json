@@ -42,7 +42,13 @@
       "Bash(where gswin64c *)",
       "Bash(php -l app/Services/PdfReport.php)",
       "Bash(npm run *)",
-      "Bash(curl -s \"http://127.0.0.1:8123/api/petty-cash/transactions?from=2026-01-01&to=2026-12-31&page=1&per_page=5\" -H \"Authorization: Bearer 4|KnNfEmpPuj4O3OayVorTO97yCe7X3wKMZDYT9HWY78e57e26\" -H \"Accept: application/json\")"
+      "Bash(curl -s \"http://127.0.0.1:8123/api/petty-cash/transactions?from=2026-01-01&to=2026-12-31&page=1&per_page=5\" -H \"Authorization: Bearer 4|KnNfEmpPuj4O3OayVorTO97yCe7X3wKMZDYT9HWY78e57e26\" -H \"Accept: application/json\")",
+      "Bash(git rm *)",
+      "Bash(xargs grep -l \"autoComplete\")",
+      "Bash(xargs grep -ln \"prefixer\")",
+      "PowerShell(vendor\\\\bin\\\\pint --dirty --format agent)",
+      "PowerShell(php artisan test --compact tests/Feature/ReportLedgerTest.php tests/Feature/OpeningBalanceTest.php)",
+      "Bash(grep -o \"Bearer [^\\\\\\\\\\\\\"]*\")"
     ]
   }
 }

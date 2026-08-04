@@ -119,6 +119,7 @@ class PettyCashController extends Controller
     public function syncExpenseAccounts(FirestoreApprovalService $firestore): JsonResponse
     {
         $firestore->syncExpenseAccounts();
+        $firestore->syncPettyCashAccounts();
 
         return response()->json(['message' => 'تم مزامنة قائمة الحسابات مع واتساب.']);
     }

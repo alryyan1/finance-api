@@ -30,11 +30,11 @@ class OpeningBalanceController extends Controller
 
         $result = $accounts->map(fn ($a) => [
             'account_id' => $a->id,
-            'code'       => $a->code,
-            'name'       => $a->name,
-            'type'       => $a->type,
-            'debit'      => number_format((float) ($balances->get($a->id)?->debit  ?? 0), 2, '.', ''),
-            'credit'     => number_format((float) ($balances->get($a->id)?->credit ?? 0), 2, '.', ''),
+            'code' => $a->code,
+            'name' => $a->name,
+            'type' => $a->type,
+            'debit' => (int) ($balances->get($a->id)?->debit ?? 0),
+            'credit' => (int) ($balances->get($a->id)?->credit ?? 0),
         ]);
 
         return response()->json($result);
@@ -47,15 +47,24 @@ class OpeningBalanceController extends Controller
     public function update(Request $request): JsonResponse
     {
         $request->validate([
-            'fiscal_year_id'   => ['nullable', 'integer', 'exists:fiscal_years,id'],
-            'rows'             => ['required', 'array'],
-            'rows.*.account_id'=> ['required', 'integer', 'exists:accounts,id'],
-            'rows.*.debit'     => ['required', 'numeric', 'min:0'],
-            'rows.*.credit'    => ['required', 'numeric', 'min:0'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'rows' => ['required', 'array'],
+            'rows.*.account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'rows.*.debit' => ['required', 'integer', 'min:0'],
+            'rows.*.credit' => ['required', 'integer', 'min:0'],
         ]);
 
         $fiscalYearId = $request->input('fiscal_year_id');
-        $rows         = $request->input('rows');
+        $rows = $request->input('rows');
+
+        $totalDebit = array_sum(array_column($rows, 'debit'));
+        $totalCredit = array_sum(array_column($rows, 'credit'));
+
+        if (abs($totalDebit - $totalCredit) > 0.005) {
+            return response()->json([
+                'message' => 'إجمالي المدين يجب أن يساوي إجمالي الدائن في الأرصدة الافتتاحية',
+            ], 422);
+        }
 
         foreach ($rows as $row) {
             OpeningBalance::where('account_id', $row['account_id'])
@@ -69,9 +78,9 @@ class OpeningBalanceController extends Controller
             if ((float) $row['debit'] > 0 || (float) $row['credit'] > 0) {
                 OpeningBalance::create([
                     'fiscal_year_id' => $fiscalYearId,
-                    'account_id'     => $row['account_id'],
-                    'debit'          => $row['debit'],
-                    'credit'         => $row['credit'],
+                    'account_id' => $row['account_id'],
+                    'debit' => $row['debit'],
+                    'credit' => $row['credit'],
                 ]);
             }
         }
