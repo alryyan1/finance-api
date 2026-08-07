@@ -27,6 +27,12 @@ class SettingController extends Controller
         'petty_cash_cash_account_id',
         'petty_cash_bank_account_id',
         'firebase_collection_name',
+        'sales_receivable_account_id',
+        'sales_revenue_account_id',
+        'sales_cogs_account_id',
+        'sales_inventory_account_id',
+        'sales_cash_account_id',
+        'sales_bank_account_id',
     ];
 
     private const JOURNAL_INT_KEYS = [
@@ -42,6 +48,16 @@ class SettingController extends Controller
     private const PETTY_CASH_ACCOUNT_INT_KEYS = [
         'petty_cash_cash_account_id',
         'petty_cash_bank_account_id',
+    ];
+
+    /** Which chart-of-accounts account each role in an imported sales journal entry maps to. */
+    private const SALES_BRIDGE_ACCOUNT_INT_KEYS = [
+        'sales_receivable_account_id',
+        'sales_revenue_account_id',
+        'sales_cogs_account_id',
+        'sales_inventory_account_id',
+        'sales_cash_account_id',
+        'sales_bank_account_id',
     ];
 
     public function index(): JsonResponse
@@ -76,6 +92,12 @@ class SettingController extends Controller
             $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
         }
 
+        // Cast sales bridge account ID keys from string to int|null
+        foreach (self::SALES_BRIDGE_ACCOUNT_INT_KEYS as $k) {
+            $raw = $result[$k] ?? '';
+            $result[$k] = ($raw !== '' && $raw !== null) ? (int) $raw : null;
+        }
+
         // Notify-on-create defaults to enabled, so installs that predate this
         // setting keep the original always-send behavior.
         $result['petty_cash_notify_on_create'] = $result['petty_cash_notify_on_create'] === ''
@@ -103,6 +125,12 @@ class SettingController extends Controller
             'petty_cash_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'petty_cash_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'firebase_collection_name' => ['nullable', 'string', 'max:100', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'sales_receivable_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_revenue_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_cogs_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_inventory_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         foreach ($data as $key => $value) {

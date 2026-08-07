@@ -2,13 +2,12 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\FiscalYear;
 use App\Models\JournalEntry;
+use App\Services\JournalEntryService;
 use App\Services\PdfReport;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -18,6 +17,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class JournalEntryController extends Controller
 {
+    public function __construct(private JournalEntryService $journalEntryService) {}
+
     public function index(Request $request): JsonResponse
     {
         $request->validate([
@@ -78,17 +79,7 @@ class JournalEntryController extends Controller
             'lines.*.credit' => ['required', 'numeric', 'min:0'],
         ]);
 
-        $this->assertBalanced($data['lines']);
-        $this->assertNotLocked($data['date']);
-
-        $entry = DB::transaction(function () use ($data) {
-            $entry = JournalEntry::create(Arr::except($data, ['lines']));
-            foreach ($data['lines'] as $line) {
-                $entry->lines()->create($line);
-            }
-
-            return $entry;
-        });
+        $entry = $this->journalEntryService->create($data);
 
         return response()->json(
             $entry->load('lines.account:id,code,name', 'lines.party:id,name'),
@@ -114,16 +105,7 @@ class JournalEntryController extends Controller
             'lines.*.credit' => ['required', 'numeric', 'min:0'],
         ]);
 
-        $this->assertBalanced($data['lines']);
-        $this->assertNotLocked($data['date']);
-
-        DB::transaction(function () use ($journalEntry, $data) {
-            $journalEntry->update(Arr::except($data, ['lines']));
-            $journalEntry->lines()->delete();
-            foreach ($data['lines'] as $line) {
-                $journalEntry->lines()->create($line);
-            }
-        });
+        $journalEntry = $this->journalEntryService->update($journalEntry, $data);
 
         return response()->json(
             $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name')
@@ -135,7 +117,7 @@ class JournalEntryController extends Controller
         if ($journalEntry->is_posted) {
             return response()->json(['message' => 'لا يمكن حذف قيد مرحَّل'], 422);
         }
-        $this->assertNotLocked($journalEntry->date->toDateString());
+        $this->journalEntryService->assertNotLocked($journalEntry->date->toDateString());
 
         $journalEntry->lines()->delete();
         $journalEntry->delete();
@@ -145,7 +127,7 @@ class JournalEntryController extends Controller
 
     public function post(JournalEntry $journalEntry): JsonResponse
     {
-        $this->assertNotLocked($journalEntry->date->toDateString());
+        $this->journalEntryService->assertNotLocked($journalEntry->date->toDateString());
         $journalEntry->update(['is_posted' => ! $journalEntry->is_posted]);
 
         return response()->json($journalEntry->fresh());
@@ -471,22 +453,5 @@ class JournalEntryController extends Controller
         }
 
         return $pdf->respond("voucher-{$entry->id}.pdf");
-    }
-
-    private function assertBalanced(array $lines): void
-    {
-        $debit = collect($lines)->sum('debit');
-        $credit = collect($lines)->sum('credit');
-
-        if (abs($debit - $credit) > 0.005) {
-            abort(422, 'مجموع المدين يجب أن يساوي مجموع الدائن');
-        }
-    }
-
-    private function assertNotLocked(string $date): void
-    {
-        if (FiscalYear::isDateLocked($date)) {
-            abort(422, 'لا يمكن تعديل قيود في سنة مالية مغلقة');
-        }
     }
 }

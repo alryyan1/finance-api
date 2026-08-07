@@ -5,7 +5,7 @@ use App\Http\Controllers\AiController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\DoctorPartyMappingController;
+use App\Http\Controllers\ExternalPartyMappingController;
 use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\JournalEntryController;
 use App\Http\Controllers\OpeningBalanceController;
@@ -34,9 +34,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('user/journal-accounts', [UserJournalAccountController::class, 'show']);
     Route::put('user/journal-accounts', [UserJournalAccountController::class, 'update']);
 
-    // Global doctor → finance party mappings
-    Route::get('doctor-party-mappings', [DoctorPartyMappingController::class, 'index']);
-    Route::put('doctor-party-mappings/{jawda_doctor_id}', [DoctorPartyMappingController::class, 'upsert']);
+    // Generic external-system → finance party mappings (sales-api, clinic app, etc.)
+    Route::get('party-mappings', [ExternalPartyMappingController::class, 'index']);
+    Route::put('party-mappings/{source_system}/{source_type}/{source_id}', [ExternalPartyMappingController::class, 'upsert']);
+    Route::delete('party-mappings/{source_system}/{source_type}/{source_id}', [ExternalPartyMappingController::class, 'destroy']);
 
     Route::get('dashboard', [DashboardController::class, 'index']);
     Route::get('fiscal-years', [FiscalYearController::class, 'index']);
@@ -88,6 +89,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('backup/{filename}', [BackupController::class, 'destroy']);
 
     Route::apiResource('accounts', AccountController::class);
+    Route::post('parties/resolve-external', [PartyController::class, 'resolveExternal']);
     Route::apiResource('parties', PartyController::class);
     Route::get('journal-entries/pdf', [JournalEntryController::class, 'listPdf']);
     Route::get('journal-entries/excel', [JournalEntryController::class, 'listExcel']);
