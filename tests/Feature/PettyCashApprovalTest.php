@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Account;
 use App\Models\JournalEntry;
+use App\Models\Party;
 use App\Models\PettyCashTransaction;
 use App\Models\Setting;
 use App\Models\User;
@@ -93,6 +94,32 @@ class PettyCashApprovalTest extends TestCase
         $entry = JournalEntry::find($txn->journal_entry_id);
         $this->assertSame($this->expenseAccount->id, $entry->lines()->where('debit', '>', 0)->value('account_id'));
         $this->assertSame($this->fundAccount->id, $entry->lines()->where('credit', '>', 0)->value('account_id'));
+    }
+
+    public function test_expense_with_party_carries_it_onto_the_posted_journal_entry_line(): void
+    {
+        $party = Party::create(['name' => 'Acme Supplier', 'type' => 'supplier', 'is_active' => true]);
+
+        $response = $this->actingAs($this->other)->postJson('/api/petty-cash/expenses', [
+            'date' => now()->toDateString(),
+            'amount' => 50,
+            'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+            'party_id' => $party->id,
+            'description' => 'Stationery',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('party.id', $party->id);
+
+        $txn = PettyCashTransaction::findOrFail($response->json('id'));
+
+        $this->actingAs($this->manager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
+            ->assertOk();
+
+        $entry = JournalEntry::find($txn->fresh()->journal_entry_id);
+        $this->assertSame($party->id, $entry->lines()->where('debit', '>', 0)->value('party_id'));
     }
 
     public function test_compound_expense_sums_line_amounts_and_leaves_contra_account_null(): void
