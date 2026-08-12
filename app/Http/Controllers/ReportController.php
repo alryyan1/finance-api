@@ -74,6 +74,23 @@ class ReportController extends Controller
         return response()->json($this->statementOfEquityData($from, $to, $fyId));
     }
 
+    /**
+     * Horizontal analysis (التحليل الأفقي) — the same balance sheet, taken "as
+     * of" two different dates, compared line-by-line: absolute difference and
+     * percentage difference per account, plus per-section subtotals.
+     */
+    public function balanceSheetHorizontal(Request $request): JsonResponse
+    {
+        $request->validate([
+            'from_as_of' => ['nullable', 'date'],
+            'from_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'to_as_of' => ['nullable', 'date'],
+            'to_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+
+        return response()->json($this->balanceSheetHorizontalData($request));
+    }
+
     // ────────────────────────────── PDF endpoints ───────────────────────────────
 
     public function trialBalancePdf(Request $request): Response
@@ -399,6 +416,89 @@ class ReportController extends Controller
         $pdf->SetTextColor(0, 0, 0);
 
         return $pdf->respond('balance-sheet.pdf');
+    }
+
+    public function balanceSheetHorizontalPdf(Request $request): Response
+    {
+        $request->validate([
+            'from_as_of' => ['nullable', 'date'],
+            'from_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'to_as_of' => ['nullable', 'date'],
+            'to_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+
+        $data = $this->balanceSheetHorizontalData($request);
+
+        $pdf = PdfReport::make('التحليل الأفقي — قائمة المركز المالي', "من {$data['from_as_of']} إلى {$data['to_as_of']}");
+        $cols = [64, 32, 32, 32, 30];
+        $headLabels = ['الحساب', $data['from_as_of'], $data['to_as_of'], 'الفرق', '% الفرق'];
+
+        $renderRows = function (array $rows) use ($pdf, $cols) {
+            $odd = false;
+            foreach ($rows as $row) {
+                $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+                $diff = (float) $row['diff'];
+                $pdf->SetTextColor($diff < 0 ? 185 : 21, $diff < 0 ? 28 : 128, $diff < 0 ? 28 : 61);
+                $pdf->Cell($cols[0], 7, $row['name'], 1, 0, 'R', true);
+                $pdf->SetTextColor(0, 0, 0);
+                $pdf->Cell($cols[1], 7, PdfReport::n($row['from']), 1, 0, 'C', true);
+                $pdf->Cell($cols[2], 7, PdfReport::n($row['to']), 1, 0, 'C', true);
+                $pdf->SetTextColor($diff < 0 ? 185 : 21, $diff < 0 ? 28 : 128, $diff < 0 ? 28 : 61);
+                $pdf->Cell($cols[3], 7, PdfReport::n($row['diff']), 1, 0, 'C', true);
+                $pdf->Cell($cols[4], 7, $row['percent'] === null ? '—' : number_format($row['percent'], 1).'%', 1, 1, 'C', true);
+                $pdf->SetTextColor(0, 0, 0);
+                $odd = ! $odd;
+            }
+        };
+
+        $renderTotal = function (string $label, array $total) use ($pdf, $cols) {
+            $diff = (float) $total['diff'];
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->SetFillColor(241, 245, 249);
+            $pdf->Cell($cols[0], 7, $label, 1, 0, 'R', true);
+            $pdf->Cell($cols[1], 7, PdfReport::n($total['from']), 1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, PdfReport::n($total['to']), 1, 0, 'C', true);
+            $pdf->SetTextColor($diff < 0 ? 185 : 21, $diff < 0 ? 28 : 128, $diff < 0 ? 28 : 61);
+            $pdf->Cell($cols[3], 7, PdfReport::n($total['diff']), 1, 0, 'C', true);
+            $pdf->Cell($cols[4], 7, $total['percent'] === null ? '—' : number_format($total['percent'], 1).'%', 1, 1, 'C', true);
+            $pdf->SetTextColor(0, 0, 0);
+            $pdf->SetFont('arial', '', 9);
+        };
+
+        $pdf->sectionHead('الأصول المتداولة');
+        $pdf->tableHead($headLabels, $cols);
+        $renderRows($data['current_assets']);
+        $renderTotal('إجمالي الأصول المتداولة', $data['totals']['total_current_assets']);
+        $pdf->Ln(3);
+
+        $pdf->sectionHead('الأصول الثابتة');
+        $pdf->tableHead($headLabels, $cols);
+        $renderRows($data['non_current_assets']);
+        $renderTotal('إجمالي الأصول الثابتة', $data['totals']['total_non_current_assets']);
+        $renderTotal('إجمالي الموجودات', $data['totals']['total_assets']);
+        $pdf->Ln(5);
+
+        $pdf->sectionHead('الخصوم المتداولة');
+        $pdf->tableHead($headLabels, $cols);
+        $renderRows($data['current_liabilities']);
+        $renderTotal('إجمالي الخصوم المتداولة', $data['totals']['total_current_liabilities']);
+        $pdf->Ln(3);
+
+        if (count($data['long_term_liabilities'])) {
+            $pdf->sectionHead('الخصوم طويلة الأجل');
+            $pdf->tableHead($headLabels, $cols);
+            $renderRows($data['long_term_liabilities']);
+            $renderTotal('إجمالي الخصوم طويلة الأجل', $data['totals']['total_long_term_liabilities']);
+            $pdf->Ln(3);
+        }
+
+        $pdf->sectionHead('حقوق الملكية');
+        $pdf->tableHead($headLabels, $cols);
+        $renderRows($data['equity']);
+        $renderTotal('إجمالي حقوق الملكية', $data['totals']['total_equity_net']);
+        $renderTotal('إجمالي المطاليب وحقوق الملكية', $data['totals']['total_liab_equity']);
+
+        return $pdf->respond('balance-sheet-horizontal.pdf');
     }
 
     public function statementOfEquityPdf(Request $request): Response
@@ -829,6 +929,97 @@ class ReportController extends Controller
             'total_long_term_liabilities' => number_format($totalLongTermLiab, 2, '.', ''),
             'working_capital' => number_format($workingCapital, 2, '.', ''),
             'net_assets' => number_format($netAssets, 2, '.', ''),
+        ];
+    }
+
+    /**
+     * @return array{from_as_of: string, to_as_of: string, current_assets: array, non_current_assets: array,
+     *     current_liabilities: array, long_term_liabilities: array, equity: array, totals: array}
+     */
+    private function balanceSheetHorizontalData(Request $request): array
+    {
+        $toAsOf = $this->resolveAsOf($request, 'to_fiscal_year_id', 'to_as_of', now()->toDateString());
+        $fromAsOf = $this->resolveAsOf($request, 'from_fiscal_year_id', 'from_as_of', now()->subYear()->toDateString());
+
+        $from = $this->balanceSheetData($fromAsOf);
+        $to = $this->balanceSheetData($toAsOf);
+
+        return [
+            'from_as_of' => $fromAsOf,
+            'to_as_of' => $toAsOf,
+            'current_assets' => $this->horizontalRows($from['current_assets'], $to['current_assets']),
+            'non_current_assets' => $this->horizontalRows($from['non_current_assets'], $to['non_current_assets']),
+            'current_liabilities' => $this->horizontalRows($from['current_liabilities'], $to['current_liabilities']),
+            'long_term_liabilities' => $this->horizontalRows($from['long_term_liabilities'], $to['long_term_liabilities']),
+            'equity' => $this->horizontalRows($from['equity'], $to['equity']),
+            'totals' => [
+                'total_current_assets' => $this->diffTotal($from['total_current_assets'], $to['total_current_assets']),
+                'total_non_current_assets' => $this->diffTotal($from['total_non_current_assets'], $to['total_non_current_assets']),
+                'total_assets' => $this->diffTotal($from['total_assets'], $to['total_assets']),
+                'total_current_liabilities' => $this->diffTotal($from['total_current_liabilities'], $to['total_current_liabilities']),
+                'total_long_term_liabilities' => $this->diffTotal($from['total_long_term_liabilities'], $to['total_long_term_liabilities']),
+                'total_equity_net' => $this->diffTotal($from['total_equity_net'], $to['total_equity_net']),
+                'total_liab_equity' => $this->diffTotal($from['total_liab_equity'], $to['total_liab_equity']),
+            ],
+        ];
+    }
+
+    /** Resolves an "as of" date from either a fiscal year (→ its end date) or an explicit date, falling back to $default. */
+    private function resolveAsOf(Request $request, string $fyField, string $dateField, string $default): string
+    {
+        $fyId = $request->input($fyField) ? (int) $request->input($fyField) : null;
+        if ($fyId) {
+            return FiscalYear::findOrFail($fyId)->end_date->toDateString();
+        }
+
+        return $request->input($dateField, $default);
+    }
+
+    /**
+     * Pairs up the same account across two balance-sheet snapshots by account_id
+     * (an account present in only one period is treated as zero in the other),
+     * and computes the absolute and percentage difference between them.
+     *
+     * @param  array<int, array{account_id: int, code: string, name: string, balance: string}>  $fromRows
+     * @param  array<int, array{account_id: int, code: string, name: string, balance: string}>  $toRows
+     */
+    private function horizontalRows(array $fromRows, array $toRows): array
+    {
+        $from = collect($fromRows)->keyBy('account_id');
+        $to = collect($toRows)->keyBy('account_id');
+
+        return $from->keys()->merge($to->keys())->unique()
+            ->map(function ($id) use ($from, $to) {
+                $f = $from->get($id);
+                $t = $to->get($id);
+                $fromBalance = (float) ($f['balance'] ?? 0);
+                $toBalance = (float) ($t['balance'] ?? 0);
+
+                return [
+                    'account_id' => $id,
+                    'code' => $t['code'] ?? $f['code'],
+                    'name' => $t['name'] ?? $f['name'],
+                    ...$this->diffTotal(
+                        number_format($fromBalance, 2, '.', ''),
+                        number_format($toBalance, 2, '.', '')
+                    ),
+                ];
+            })
+            ->sortBy('code')->values()->all();
+    }
+
+    /** @return array{from: string, to: string, diff: string, percent: float|null} */
+    private function diffTotal(string $from, string $to): array
+    {
+        $fromValue = (float) $from;
+        $toValue = (float) $to;
+        $diff = $toValue - $fromValue;
+
+        return [
+            'from' => $from,
+            'to' => $to,
+            'diff' => number_format($diff, 2, '.', ''),
+            'percent' => abs($fromValue) > 0.005 ? round($diff / abs($fromValue) * 100, 1) : null,
         ];
     }
 

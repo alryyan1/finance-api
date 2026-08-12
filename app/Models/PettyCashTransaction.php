@@ -12,12 +12,14 @@ class PettyCashTransaction extends Model
         'source_account_id', 'created_by_user_id', 'type', 'status', 'date', 'amount', 'beneficiary_name', 'party_id', 'contra_account_id',
         'description', 'document_path', 'document_original_name', 'document_firebase_url', 'journal_entry_id',
         'manager_approved_at', 'manager_approved_by_user_id',
+        'auditor_approved_at', 'auditor_approved_by_user_id',
     ];
 
     protected $casts = [
         'date' => 'date:Y-m-d',
         'amount' => 'decimal:2',
         'manager_approved_at' => 'datetime',
+        'auditor_approved_at' => 'datetime',
     ];
 
     public function sourceAccount(): BelongsTo
@@ -58,6 +60,11 @@ class PettyCashTransaction extends Model
     public function managerApprovedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'manager_approved_by_user_id');
+    }
+
+    public function auditorApprovedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'auditor_approved_by_user_id');
     }
 
     /**

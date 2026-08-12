@@ -76,11 +76,20 @@
       "Bash(npm ping *)",
       "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path\")",
       "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -in 5173,5174,5175,5176} | Select-Object LocalPort')",
-      "Bash(php -l app/Http/Controllers/JournalEntryController.php)"
+      "Bash(php -l app/Http/Controllers/JournalEntryController.php)",
+      "Bash(xargs grep -l \"permission\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5174/)",
+      "Bash(chromium-cli --session finance)",
+      "Bash(node -e \"require.resolve\\('playwright'\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Bash(mkdir -p C:/Users/ryyan/AppData/Local/Temp/claude/c--xampp-htdocs-finance-api/7e4139b8-0338-4346-a1a0-89c747c68caf/scratchpad/pw)",
+      "Bash(npm init *)"
     ],
     "additionalDirectories": [
       "c:\\xampp\\htdocs\\finance\\src",
-      "C:\\xampp\\htdocs\\finance\\src\\api"
+      "C:\\xampp\\htdocs\\finance\\src\\api",
+      "C:\\xampp\\htdocs\\finance\\src",
+      "C:\\xampp\\htdocs\\finance"
     ]
   }
 }

@@ -64,6 +64,26 @@ class PettyCashApprovalService
     }
 
     /**
+     * Records the auditor's review of a pending petty cash expense. Purely an
+     * informational stamp alongside the manager's — it does not post the journal
+     * entry and does not gate the manager's approval. Idempotent, like approve().
+     */
+    public function approveAuditor(PettyCashTransaction $transaction, int $approverUserId): PettyCashTransaction
+    {
+        abort_if($transaction->type !== 'expense', 422, 'لا يخضع هذا النوع من الحركات للتدقيق.');
+
+        return DB::transaction(function () use ($transaction, $approverUserId) {
+            $transaction = PettyCashTransaction::whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            if ($transaction->auditor_approved_at === null) {
+                $transaction->update(['auditor_approved_at' => now(), 'auditor_approved_by_user_id' => $approverUserId]);
+            }
+
+            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
+        });
+    }
+
+    /**
      * Catches up MySQL with anything that happened via WhatsApp while nobody had
      * the app open: an approval tap (the now-removed real-time webhook used to
      * push these), or a receipt photo/PDF attached through the bot's list-picker

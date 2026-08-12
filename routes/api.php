@@ -68,6 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/income-statement/pdf', [ReportController::class, 'incomeStatementPdf'])->middleware('permission:reports.export');
     Route::get('reports/balance-sheet', [ReportController::class, 'balanceSheet'])->middleware('permission:reports.view');
     Route::get('reports/balance-sheet/pdf', [ReportController::class, 'balanceSheetPdf'])->middleware('permission:reports.export');
+    Route::get('reports/balance-sheet/horizontal', [ReportController::class, 'balanceSheetHorizontal'])->middleware('permission:reports.view');
+    Route::get('reports/balance-sheet/horizontal/pdf', [ReportController::class, 'balanceSheetHorizontalPdf'])->middleware('permission:reports.export');
     Route::get('reports/statement-of-equity', [ReportController::class, 'statementOfEquity'])->middleware('permission:reports.view');
     Route::get('reports/statement-of-equity/pdf', [ReportController::class, 'statementOfEquityPdf'])->middleware('permission:reports.export');
 
@@ -80,6 +82,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'uploadDocument'])->middleware('permission:petty-cash.document.upload');
     Route::delete('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'deleteDocument'])->middleware('permission:petty-cash.document.delete');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/manager', [PettyCashController::class, 'approveByManager'])->middleware('permission:petty-cash.approve');
+    Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/auditor', [PettyCashController::class, 'approveByAuditor'])->middleware('permission:petty-cash.approve.auditor');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/reconcile', [PettyCashController::class, 'reconcile'])->middleware('permission:petty-cash.reconcile');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/notify', [PettyCashController::class, 'sendNotification'])->middleware('permission:petty-cash.edit');
     Route::post('petty-cash/sync-expense-accounts', [PettyCashController::class, 'syncExpenseAccounts'])->middleware('permission:petty-cash.edit');
