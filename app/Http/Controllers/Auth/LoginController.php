@@ -3,8 +3,9 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
@@ -13,7 +14,7 @@ class LoginController extends Controller
     public function login(Request $request): JsonResponse
     {
         if (Auth::check()) {
-            return response()->json(['user' => Auth::user()]);
+            return response()->json(['user' => $this->withAbilities(Auth::user())]);
         }
 
         $request->validate([
@@ -30,7 +31,7 @@ class LoginController extends Controller
         $request->session()->regenerate();
 
         return response()->json([
-            'user' => Auth::user(),
+            'user' => $this->withAbilities(Auth::user()),
         ]);
     }
 
@@ -46,6 +47,19 @@ class LoginController extends Controller
 
     public function user(Request $request): JsonResponse
     {
-        return response()->json($request->user());
+        return response()->json($this->withAbilities($request->user()));
+    }
+
+    /**
+     * Serialize the user with their role names and effective permission names,
+     * so the frontend can gate UI without a round-trip per permission check.
+     */
+    private function withAbilities(User $user): array
+    {
+        return [
+            ...$user->toArray(),
+            'roles' => $user->getRoleNames(),
+            'permissions' => $user->getAllPermissions()->pluck('name'),
+        ];
     }
 }

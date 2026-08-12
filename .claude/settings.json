@@ -48,7 +48,39 @@
       "Bash(xargs grep -ln \"prefixer\")",
       "PowerShell(vendor\\\\bin\\\\pint --dirty --format agent)",
       "PowerShell(php artisan test --compact tests/Feature/ReportLedgerTest.php tests/Feature/OpeningBalanceTest.php)",
-      "Bash(grep -o \"Bearer [^\\\\\\\\\\\\\"]*\")"
+      "Bash(grep -o \"Bearer [^\\\\\\\\\\\\\"]*\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5199/)",
+      "Bash(pkill -f \"vite --port 5199\")",
+      "mcp__firebase__firestore_add_document",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost/finance-api/public/api/user -H \"Accept: application/json\")",
+      "mcp__firebase__firestore_update_document",
+      "Bash(curl -s http://localhost/finance-api/public/api/settings -X PUT -H 'Authorization: Bearer 3|dUCaRiZc1g6qNKniRbGto9ekXOIF5sclQveBSbbT22f7476e' -H 'Accept: application/json' -H 'Content-Type: application/json; charset=utf-8' --data-binary @/c/Users/ryyan/AppData/Local/Temp/claude/c--xampp-htdocs-finance-api/823fcd21-c7f5-44cd-8f73-0b04643bd275/scratchpad/sales_bridge_settings.json)",
+      "Bash(claude mcp *)",
+      "mcp__mui-mcp__fetchDocs",
+      "Bash(sleep 2 && cat /tmp/sales-ui-dev.log)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5175/)",
+      "Bash(pkill -f \"vite\")",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //PID 30284 //F)",
+      "Bash(taskkill //PID 17824 //F)",
+      "Bash(node -e \"const p=require\\('./node_modules/@mui/x-data-grid/package.json'\\); console.log\\(p.version, p.exports ? Object.keys\\(p.exports\\) : 'no exports field'\\)\")",
+      "mcp__mui-mcp__useMuiDocs",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5175/src/components/admin/users/UsersListPage.tsx)",
+      "Bash(taskkill //PID 31084 //F)",
+      "Bash(taskkill //PID 28692 //F)",
+      "Bash(taskkill //PID 25868 //F)",
+      "Bash(php -l database/seeders/ComputerShopProductsSeeder.php)",
+      "Bash(npx shadcn@latest mcp --help)",
+      "Bash(npx --yes shadcn@latest --help)",
+      "Bash(npm ping *)",
+      "Bash(powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, Path\")",
+      "Bash(powershell -Command 'Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object {$_.LocalPort -in 5173,5174,5175,5176} | Select-Object LocalPort')",
+      "Bash(php -l app/Http/Controllers/JournalEntryController.php)"
+    ],
+    "additionalDirectories": [
+      "c:\\xampp\\htdocs\\finance\\src",
+      "C:\\xampp\\htdocs\\finance\\src\\api"
     ]
   }
 }
