@@ -489,6 +489,18 @@ class PettyCashController extends Controller
         return response()->json($service->approveAuditor($pettyCashTransaction, $auditorId));
     }
 
+    public function updateAuditorComment(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
+    {
+        $auditorId = (int) Setting::where('key', 'petty_cash_auditor_user_id')->value('value');
+        abort_if(! $auditorId || $request->user()->id !== $auditorId, 403, 'غير مصرح لك بإضافة ملاحظة التدقيق.');
+
+        $data = $request->validate([
+            'auditor_comment' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        return response()->json($service->updateAuditorComment($pettyCashTransaction, $data['auditor_comment'] ?? null));
+    }
+
     public function uploadDocument(Request $request, PettyCashTransaction $pettyCashTransaction, FirebaseStorageService $storage, FirestoreApprovalService $firestore): JsonResponse
     {
         $request->validate([

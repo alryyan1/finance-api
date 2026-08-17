@@ -84,6 +84,18 @@ class PettyCashApprovalService
     }
 
     /**
+     * Sets or clears the auditor's free-text note on a transaction. Independent
+     * of approveAuditor() — usable whether or not the transaction has been
+     * audited yet, so the auditor can annotate a review after the fact.
+     */
+    public function updateAuditorComment(PettyCashTransaction $transaction, ?string $comment): PettyCashTransaction
+    {
+        $transaction->update(['auditor_comment' => $comment]);
+
+        return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
+    }
+
+    /**
      * Catches up MySQL with anything that happened via WhatsApp while nobody had
      * the app open: an approval tap (the now-removed real-time webhook used to
      * push these), or a receipt photo/PDF attached through the bot's list-picker

@@ -506,4 +506,42 @@ class PettyCashApprovalTest extends TestCase
             ->deleteJson("/api/petty-cash/transactions/{$txn->id}/document")
             ->assertNotFound();
     }
+
+    public function test_auditor_can_set_and_update_a_comment_regardless_of_approval_state(): void
+    {
+        $auditor = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_auditor_user_id'], ['value' => (string) $auditor->id]);
+
+        $txn = $this->createPendingExpense();
+
+        $this->actingAs($auditor)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/auditor-comment", ['auditor_comment' => 'يحتاج فاتورة أوضح'])
+            ->assertOk()
+            ->assertJsonPath('auditor_comment', 'يحتاج فاتورة أوضح');
+
+        $this->assertNull($txn->fresh()->auditor_approved_at);
+
+        $this->actingAs($auditor)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/auditor")
+            ->assertOk();
+
+        $this->actingAs($auditor)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/auditor-comment", ['auditor_comment' => 'تم التحقق من الفاتورة'])
+            ->assertOk()
+            ->assertJsonPath('auditor_comment', 'تم التحقق من الفاتورة');
+
+        $this->assertSame('تم التحقق من الفاتورة', $txn->fresh()->auditor_comment);
+    }
+
+    public function test_non_auditor_cannot_set_auditor_comment(): void
+    {
+        $auditor = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_auditor_user_id'], ['value' => (string) $auditor->id]);
+
+        $txn = $this->createPendingExpense();
+
+        $this->actingAs($this->other)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/auditor-comment", ['auditor_comment' => 'محاولة غير مصرح بها'])
+            ->assertForbidden();
+    }
 }

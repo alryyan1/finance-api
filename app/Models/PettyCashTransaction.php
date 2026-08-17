@@ -12,7 +12,7 @@ class PettyCashTransaction extends Model
         'source_account_id', 'created_by_user_id', 'type', 'status', 'date', 'amount', 'beneficiary_name', 'party_id', 'contra_account_id',
         'description', 'document_path', 'document_original_name', 'document_firebase_url', 'journal_entry_id',
         'manager_approved_at', 'manager_approved_by_user_id',
-        'auditor_approved_at', 'auditor_approved_by_user_id',
+        'auditor_approved_at', 'auditor_approved_by_user_id', 'auditor_comment',
     ];
 
     protected $casts = [
