@@ -25,6 +25,7 @@ Route::post('/login', [LoginController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [LoginController::class, 'user']);
     Route::post('/logout', [LoginController::class, 'logout']);
+    Route::put('/user/password', [LoginController::class, 'updatePassword']);
 
     // Personal access tokens (used by external systems like clinic app)
     Route::get('tokens', [TokenController::class, 'index'])->middleware('permission:tokens.view');
