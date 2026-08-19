@@ -96,6 +96,30 @@ class PettyCashApprovalTest extends TestCase
         $this->assertSame($this->fundAccount->id, $entry->lines()->where('credit', '>', 0)->value('account_id'));
     }
 
+    public function test_creating_a_receipt_posts_journal_entry_immediately_with_cash_debited(): void
+    {
+        $capitalAccount = Account::create(['code' => '301', 'name' => 'Owner Capital', 'type' => 'equity', 'is_active' => true]);
+
+        $response = $this->actingAs($this->other)->postJson('/api/petty-cash/receipts', [
+            'date' => now()->toDateString(),
+            'amount' => 200,
+            'contra_account_id' => $capitalAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+            'description' => 'Top up from owner',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('status', 'approved');
+        $response->assertJsonPath('type', 'replenishment');
+
+        $txn = PettyCashTransaction::where('description', 'Top up from owner')->firstOrFail();
+        $this->assertNotNull($txn->journal_entry_id);
+
+        $entry = JournalEntry::find($txn->journal_entry_id);
+        $this->assertSame($this->fundAccount->id, $entry->lines()->where('debit', '>', 0)->value('account_id'));
+        $this->assertSame($capitalAccount->id, $entry->lines()->where('credit', '>', 0)->value('account_id'));
+    }
+
     public function test_expense_with_party_carries_it_onto_the_posted_journal_entry_line(): void
     {
         $party = Party::create(['name' => 'Acme Supplier', 'type' => 'supplier', 'is_active' => true]);

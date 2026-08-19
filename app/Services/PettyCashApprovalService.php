@@ -278,9 +278,18 @@ class PettyCashApprovalService
         }
     }
 
-    private function postJournalEntry(PettyCashTransaction $transaction): void
+    /**
+     * Posts the journal entry for a petty cash transaction. For an expense, the
+     * contra account (e.g. an expense account) is debited and the source
+     * account (cash/bank) is credited. For a receipt/replenishment it's the
+     * opposite — the source account (cash/bank) is debited since it's
+     * receiving money, and the contra account (where the money came from) is
+     * credited. `source_account_id` always refers to the petty cash/bank
+     * account either way, which is what the "filter by account" dropdown relies on.
+     */
+    public function postJournalEntry(PettyCashTransaction $transaction): void
     {
-        $desc = $transaction->description ?? 'مصروف نثرية';
+        $desc = $transaction->description ?? ($transaction->type === 'expense' ? 'مصروف نثرية' : 'إذن قبض نثرية');
 
         $entry = JournalEntry::create([
             'date' => $transaction->date,
@@ -290,37 +299,30 @@ class PettyCashApprovalService
 
         $transaction->loadMissing(['lines', 'creditLines']);
 
-        $debitLines = $transaction->lines->isNotEmpty()
-            ? $transaction->lines->map(fn ($line) => [
-                'account_id' => $line->contra_account_id,
-                'party_id' => $transaction->party_id,
-                'debit' => $line->amount,
-                'credit' => 0,
-                'description' => $desc,
-            ])->all()
-            : [[
-                'account_id' => $transaction->contra_account_id,
-                'party_id' => $transaction->party_id,
-                'debit' => $transaction->amount,
-                'credit' => 0,
-                'description' => $desc,
-            ]];
+        $contraLines = $transaction->lines->isNotEmpty()
+            ? $transaction->lines->map(fn ($line) => ['account_id' => $line->contra_account_id, 'party_id' => $transaction->party_id, 'amount' => $line->amount])->all()
+            : [['account_id' => $transaction->contra_account_id, 'party_id' => $transaction->party_id, 'amount' => $transaction->amount]];
 
-        $creditLines = $transaction->creditLines->isNotEmpty()
-            ? $transaction->creditLines->map(fn ($line) => [
-                'account_id' => $line->source_account_id,
-                'debit' => 0,
-                'credit' => $line->amount,
-                'description' => $desc,
-            ])->all()
-            : [[
-                'account_id' => $transaction->source_account_id,
-                'debit' => 0,
-                'credit' => $transaction->amount,
-                'description' => $desc,
-            ]];
+        $sourceLines = $transaction->creditLines->isNotEmpty()
+            ? $transaction->creditLines->map(fn ($line) => ['account_id' => $line->source_account_id, 'party_id' => null, 'amount' => $line->amount])->all()
+            : [['account_id' => $transaction->source_account_id, 'party_id' => null, 'amount' => $transaction->amount]];
 
-        $entry->lines()->createMany([...$debitLines, ...$creditLines]);
+        [$debitLines, $creditLines] = $transaction->type === 'expense'
+            ? [$contraLines, $sourceLines]
+            : [$sourceLines, $contraLines];
+
+        $toEntryLine = fn (array $l, bool $isDebit) => [
+            'account_id' => $l['account_id'],
+            'party_id' => $l['party_id'],
+            'debit' => $isDebit ? $l['amount'] : 0,
+            'credit' => $isDebit ? 0 : $l['amount'],
+            'description' => $desc,
+        ];
+
+        $entry->lines()->createMany([
+            ...array_map(fn ($l) => $toEntryLine($l, true), $debitLines),
+            ...array_map(fn ($l) => $toEntryLine($l, false), $creditLines),
+        ]);
 
         $transaction->update(['journal_entry_id' => $entry->id, 'status' => 'approved']);
     }

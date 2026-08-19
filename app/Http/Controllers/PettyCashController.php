@@ -404,6 +404,74 @@ class PettyCashController extends Controller
     }
 
     /**
+     * POST /petty-cash/receipts — records money received into the petty cash
+     * fund (e.g. a bank transfer topping it up). Unlike an expense, a receipt
+     * needs no manager approval — its journal entry posts immediately.
+     */
+    public function storeReceipt(Request $request, FirestoreApprovalService $firestore, FirebaseStorageService $storage, PettyCashApprovalService $approval): JsonResponse
+    {
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            'beneficiary_name' => ['nullable', 'string', 'max:255'],
+            'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'document' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
+            'amount' => ['required', 'numeric', 'min:0.01'],
+            'contra_account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'source_account_id' => ['required', 'integer', 'exists:accounts,id'],
+        ]);
+
+        if (FiscalYear::isDateLocked($data['date'])) {
+            abort(422, 'هذه الفترة مغلقة ولا يمكن إضافة إذن قبض لها.');
+        }
+
+        $documentPath = null;
+        $documentOriginalName = null;
+        if ($request->hasFile('document')) {
+            $documentPath = $request->file('document')->store('petty-cash-receipts', 'local');
+            $documentOriginalName = $request->file('document')->getClientOriginalName();
+        }
+
+        $transaction = DB::transaction(function () use ($request, $data, $documentPath, $documentOriginalName) {
+            return PettyCashTransaction::create([
+                'source_account_id' => $data['source_account_id'],
+                'created_by_user_id' => $request->user()->id,
+                'type' => 'replenishment',
+                'date' => $data['date'],
+                'amount' => $data['amount'],
+                'beneficiary_name' => $data['beneficiary_name'] ?? null,
+                'party_id' => $data['party_id'] ?? null,
+                'contra_account_id' => $data['contra_account_id'],
+                'description' => $data['description'] ?? null,
+                'document_path' => $documentPath,
+                'document_original_name' => $documentOriginalName,
+                'journal_entry_id' => null,
+            ]);
+        });
+
+        [$documentUrl, $documentType] = $this->uploadReceiptToFirebaseStorage($storage, $transaction);
+        if ($documentUrl) {
+            $transaction->update(['document_firebase_url' => $documentUrl]);
+        }
+
+        $approval->postJournalEntry($transaction);
+
+        try {
+            $firestore->createMirror($transaction, $documentUrl, $documentType);
+        } catch (\Throwable $e) {
+            Log::error('Failed to create Firestore mirror for petty cash transaction', [
+                'transaction_id' => $transaction->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json(
+            $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'sourceAccount:id,code,name'])->toArray(),
+            201
+        );
+    }
+
+    /**
      * (Re)send the WhatsApp approval-request template to the designated manager
      * for a pending expense. Synchronous — the caller waits for the send to
      * complete (or fail) and shows the result.
