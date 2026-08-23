@@ -34,6 +34,7 @@ class SettingController extends Controller
         'sales_inventory_account_id',
         'sales_cash_account_id',
         'sales_bank_account_id',
+        'sales_discount_account_id',
     ];
 
     private const JOURNAL_INT_KEYS = [
@@ -60,6 +61,7 @@ class SettingController extends Controller
         'sales_inventory_account_id',
         'sales_cash_account_id',
         'sales_bank_account_id',
+        'sales_discount_account_id',
     ];
 
     public function index(): JsonResponse
@@ -134,6 +136,7 @@ class SettingController extends Controller
             'sales_inventory_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'sales_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'sales_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'sales_discount_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
         ]);
 
         foreach ($data as $key => $value) {
