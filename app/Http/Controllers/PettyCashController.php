@@ -538,7 +538,12 @@ class PettyCashController extends Controller
     {
         $transaction = $service->reconcileFromFirestore($pettyCashTransaction);
 
-        return response()->json($transaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']));
+        // Must carry the same relations the list endpoint eager-loads: the
+        // frontend's Firestore listener merges this response straight into the
+        // already-rendered row (prev.map(t => byId.get(t.id) ?? t)), so any
+        // relation missing here (sourceAccount, createdBy) blanks that column
+        // until a full reload.
+        return response()->json($transaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name', 'managerApprovedBy:id,name']));
     }
 
     public function approveByManager(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
