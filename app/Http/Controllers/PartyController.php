@@ -45,6 +45,11 @@ class PartyController extends Controller
         );
     }
 
+    public function show(Party $party): JsonResponse
+    {
+        return response()->json($party->load('account:id,code,name'));
+    }
+
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([

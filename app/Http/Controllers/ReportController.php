@@ -10,6 +10,12 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
@@ -181,6 +187,7 @@ class ReportController extends Controller
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date', 'after_or_equal:from'],
             'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'view' => ['nullable', 'string', 'in:arabic,gl'],
         ]);
         $from = $request->input('from', now()->startOfYear()->toDateString());
         $to = $request->input('to', now()->toDateString());
@@ -193,13 +200,25 @@ class ReportController extends Controller
             $fyId
         );
 
+        if ($request->input('view') === 'gl') {
+            return $this->ledgerPdfGl($data, $from, $to);
+        }
+
         $acct = $data['account'];
         $pdf = PdfReport::make(
             'كشف حساب: '.$acct['name'],
             "من {$from} إلى {$to}"
         );
 
-        $cols = [22, 20, 60, 28, 20, 20, 20];
+        // Whole-number money: these amounts carry no meaningful fractional part,
+        // and the trailing ".00" only pushed the numeric columns past their width
+        // so adjacent values ran together.
+        $money = fn ($v) => number_format(round((float) $v), 0, '.', ',');
+
+        // Widths (mm) sum to 190 (A4 portrait content width). The three numeric
+        // columns are wide enough for 8-digit thousands-separated values plus the
+        // trailing " م"/" د" side marker; text cells are truncated with fit().
+        $cols = [20, 15, 50, 28, 25, 25, 27];
         $pdf->tableHead(['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد'], $cols);
 
         // Opening balance row
@@ -212,32 +231,152 @@ class ReportController extends Controller
         $pdf->Cell($cols[3], 6, '', 1, 0, 'C', true);
         $pdf->Cell($cols[4], 6, '', 1, 0, 'C', true);
         $pdf->Cell($cols[5], 6, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[6], 6, PdfReport::n($data['opening_balance']).$obSide, 1, 1, 'C', true);
+        $pdf->Cell($cols[6], 6, $money($data['opening_balance']).$obSide, 1, 1, 'C', true, '', 1);
         $pdf->SetFont('arial', '', 9);
 
         $odd = false;
         foreach ($data['rows'] as $row) {
             $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
             $side = $row['balance_side'] === 'debit' ? ' م' : ' د';
-            $debit = (float) $row['debit'] > 0 ? PdfReport::n($row['debit']) : '—';
-            $credit = (float) $row['credit'] > 0 ? PdfReport::n($row['credit']) : '—';
-            $desc = $row['entry_description'];
+            $debit = (float) $row['debit'] > 0 ? $money($row['debit']) : '—';
+            $credit = (float) $row['credit'] > 0 ? $money($row['credit']) : '—';
 
             $pdf->Cell($cols[0], 7, $row['date'], 1, 0, 'C', true);
             $pdf->Cell($cols[1], 7, $row['reference'] ?? '—', 1, 0, 'C', true);
-            $pdf->Cell($cols[2], 7, $desc, 1, 0, 'R', true);
-            $pdf->Cell($cols[3], 7, $row['party_name'] ?? '—', 1, 0, 'R', true);
-            $pdf->Cell($cols[4], 7, $debit, 1, 0, 'C', true);
-            $pdf->Cell($cols[5], 7, $credit, 1, 0, 'C', true);
-            $pdf->Cell($cols[6], 7, PdfReport::n($row['balance']).$side, 1, 1, 'C', true);
+            $pdf->Cell($cols[2], 7, $pdf->fit((string) $row['entry_description'], $cols[2] - 3), 1, 0, 'R', true);
+            $pdf->Cell($cols[3], 7, $pdf->fit((string) ($row['party_name'] ?? '—'), $cols[3] - 3), 1, 0, 'R', true);
+            $pdf->Cell($cols[4], 7, $debit, 1, 0, 'C', true, '', 1);
+            $pdf->Cell($cols[5], 7, $credit, 1, 0, 'C', true, '', 1);
+            $pdf->Cell($cols[6], 7, $money($row['balance']).$side, 1, 1, 'C', true, '', 1);
             $odd = ! $odd;
         }
 
         $clSide = $data['closing_side'] === 'debit' ? ' م' : ' د';
         $pdf->totalsRow(
-            ['الإجمالي', PdfReport::n($data['totals']['debit']), PdfReport::n($data['totals']['credit']), PdfReport::n($data['closing_balance']).$clSide],
+            ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance']).$clSide],
             [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6]]
         );
+
+        return $pdf->respond('ledger.pdf');
+    }
+
+    /**
+     * "General Ledger" styled PDF — mirrors the on-screen GeneralLedgerView:
+     * bilingual title bar, red Account No./Name row, LTR columns with Dr/Cr balance.
+     */
+    private function ledgerPdfGl(array $data, string $from, string $to): Response
+    {
+        $acct = $data['account'];
+        $pdf = PdfReport::make('كشف حساب: '.$acct['name'], "من {$from} إلى {$to}");
+        $pdf->SetRTL(false);
+
+        $money = fn ($v) => number_format(round((float) $v), 0, '.', ',');
+        $sideEn = fn ($s) => $s === 'debit' ? 'Dr' : 'Cr';
+
+        // Column widths (mm) — total 190 (A4 portrait content width)
+        $w = [26, 22, 70, 24, 24, 24];
+        $full = array_sum($w);
+        $pageBottom = $pdf->getPageHeight() - 20;
+
+        // ── Title bar ────────────────────────────────────────────────────────
+        $pdf->SetDrawColor(13, 43, 110);
+        $pdf->SetLineWidth(0.4);
+        $pdf->SetFillColor(26, 58, 143);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetFont('arialbd', '', 14);
+        $pdf->Cell($full / 2, 11, 'General Ledger', 1, 0, 'C', true);
+        $pdf->Cell($full / 2, 11, 'دفتر الأستاذ العام', 1, 1, 'C', true);
+
+        // ── Account info row ─────────────────────────────────────────────────
+        $pdf->SetFillColor(245, 248, 255);
+        $pdf->SetTextColor(192, 0, 26);
+        $pdf->SetFont('arialbd', '', 10);
+        $pdf->Cell($full / 2, 8, 'Account No. : '.$acct['code'], 1, 0, 'L', true);
+        $pdf->Cell($full / 2, 8, 'Account Name : '.$acct['name'], 1, 1, 'R', true);
+
+        // ── Table header ─────────────────────────────────────────────────────
+        $pdf->SetFillColor(26, 58, 143);
+        $pdf->SetTextColor(255, 255, 255);
+        $pdf->SetFont('arialbd', '', 9);
+        foreach (array_map(null, ['Date', 'Trx. No.', 'Description', 'Debit', 'Credit', 'Balance'], $w) as [$label, $cw]) {
+            $pdf->Cell($cw, 8, $label, 1, 0, 'C', true);
+        }
+        $pdf->Ln();
+
+        $pdf->SetDrawColor(205, 214, 240);
+        $pdf->SetLineWidth(0.2);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetFont('arial', '', 8);
+
+        // ── Opening balance row ──────────────────────────────────────────────
+        $pdf->SetFillColor(240, 244, 255);
+        $pdf->Cell($w[0], 7, $from, 1, 0, 'C', true);
+        $pdf->Cell($w[1], 7, '', 1, 0, 'C', true);
+        $pdf->SetFont('arialbd', '', 8);
+        $pdf->Cell($w[2], 7, 'Opening Balance', 1, 0, 'C', true);
+        $pdf->Cell($w[3], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($w[4], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($w[5], 7, $money($data['opening_balance']).' '.$sideEn($data['opening_side']), 1, 1, 'R', true);
+        $pdf->SetFont('arial', '', 8);
+
+        // ── Transaction rows ────────────────────────────────────────────────
+        if (count($data['rows']) === 0) {
+            $pdf->SetTextColor(136, 136, 136);
+            $pdf->Cell($full, 12, 'No transactions in this period', 1, 1, 'C');
+            $pdf->SetTextColor(0, 0, 0);
+        }
+
+        foreach ($data['rows'] as $row) {
+            $parts = array_values(array_filter([
+                $row['entry_description'],
+                $row['line_description'] ?? null,
+                $row['party_name'] ?? null,
+            ], fn ($v) => $v !== null && $v !== ''));
+            $desc = implode("\n", $parts);
+
+            $nb = max(1, $pdf->getNumLines($desc, $w[2]));
+            $h = max(7, $nb * 4 + 2);
+
+            if ($pdf->GetY() + $h > $pageBottom) {
+                $pdf->AddPage();
+            }
+            $x = $pdf->GetX();
+            $y = $pdf->GetY();
+
+            $debit = (float) $row['debit'] > 0 ? $money($row['debit']) : '—';
+            $credit = (float) $row['credit'] > 0 ? $money($row['credit']) : '—';
+            $bal = $money($row['balance']).' '.$sideEn($row['balance_side']);
+
+            $cell = function ($i, $txt, $align) use ($pdf, $w, $x, $y, $h) {
+                $off = array_sum(array_slice($w, 0, $i));
+
+                return $pdf->MultiCell($w[$i], $h, $txt, 1, $align, false, $i === 5 ? 1 : 0,
+                    $x + $off, $y, true, 0, false, true, $h, 'M');
+            };
+            $cell(0, $row['date'], 'C');
+            $cell(1, $row['reference'] ?? '—', 'C');
+            $cell(2, $desc, 'L');
+            $cell(3, $debit, 'R');
+            $cell(4, $credit, 'R');
+            $cell(5, $bal, 'R');
+        }
+
+        // ── Totals row ──────────────────────────────────────────────────────
+        if (count($data['rows']) > 0) {
+            if ($pdf->GetY() + 8 > $pageBottom) {
+                $pdf->AddPage();
+            }
+            $pdf->SetDrawColor(13, 43, 110);
+            $pdf->SetLineWidth(0.4);
+            $pdf->SetFillColor(232, 238, 255);
+            $pdf->SetFont('arialbd', '', 9);
+            $pdf->Cell($w[0] + $w[1] + $w[2], 8, 'Total', 1, 0, 'C', true);
+            $pdf->Cell($w[3], 8, $money($data['totals']['debit']), 1, 0, 'R', true);
+            $pdf->Cell($w[4], 8, $money($data['totals']['credit']), 1, 0, 'R', true);
+            $pdf->SetTextColor(192, 0, 26);
+            $pdf->Cell($w[5], 8, $money($data['closing_balance']).' '.$sideEn($data['closing_side']), 1, 1, 'R', true);
+            $pdf->SetTextColor(0, 0, 0);
+        }
 
         return $pdf->respond('ledger.pdf');
     }
@@ -560,6 +699,394 @@ class ReportController extends Controller
         $pdf->SetTextColor(0, 0, 0);
 
         return $pdf->respond('statement-of-equity.pdf');
+    }
+
+    // ────────────────────────────── Excel endpoints ─────────────────────────────
+
+    public function trialBalanceExcel(Request $request): StreamedResponse
+    {
+        ['from' => $from, 'to' => $to, 'fiscal_year_id' => $fyId] = $this->validateDateRange($request);
+        $data = $this->trialBalanceData($from, $to, $fyId);
+
+        [$spreadsheet, $sheet] = $this->newSheet('ميزان المراجعة');
+        $this->titleRows($sheet, 'ميزان المراجعة', "الفترة من {$from} إلى {$to}");
+
+        $headers = ['الرمز', 'اسم الحساب', 'رصيد أول الفترة (مدين)', 'رصيد أول الفترة (دائن)', 'مدين الفترة', 'دائن الفترة', 'رصيد مدين', 'رصيد دائن'];
+        $sheet->fromArray($headers, null, 'A4');
+        $this->styleHeader($sheet, 'A4:H4');
+
+        $typeLabels = ['asset' => 'أصول', 'liability' => 'خصوم', 'equity' => 'حقوق الملكية', 'revenue' => 'إيرادات', 'expense' => 'مصروفات'];
+        $row = 5;
+
+        foreach (['asset', 'liability', 'equity', 'revenue', 'expense'] as $type) {
+            $group = collect($data['rows'])->where('type', $type)->values();
+            if ($group->isEmpty()) {
+                continue;
+            }
+            $sheet->setCellValue("A{$row}", $typeLabels[$type]);
+            $sheet->getStyle("A{$row}:H{$row}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            ]);
+            $row++;
+
+            foreach ($group as $r) {
+                $openDebit = $r['opening_side'] === 'debit' ? (float) $r['opening_balance'] : 0;
+                $openCredit = $r['opening_side'] === 'credit' ? (float) $r['opening_balance'] : 0;
+                $sheet->fromArray([
+                    $r['code'], $r['name'], $openDebit, $openCredit,
+                    (float) $r['total_debit'], (float) $r['total_credit'],
+                    (float) $r['balance_debit'], (float) $r['balance_credit'],
+                ], null, "A{$row}");
+                $row++;
+            }
+        }
+
+        $t = $data['totals'];
+        $sheet->setCellValue("B{$row}", 'الإجمالي');
+        $sheet->setCellValue("C{$row}", $t['opening_side'] === 'debit' ? (float) $t['opening_balance'] : 0);
+        $sheet->setCellValue("D{$row}", $t['opening_side'] === 'credit' ? (float) $t['opening_balance'] : 0);
+        $sheet->setCellValue("E{$row}", (float) $t['debit']);
+        $sheet->setCellValue("F{$row}", (float) $t['credit']);
+        $sheet->setCellValue("G{$row}", (float) $t['balance_debit']);
+        $sheet->setCellValue("H{$row}", (float) $t['balance_credit']);
+        $this->styleTotals($sheet, "A{$row}:H{$row}");
+
+        $this->numberFormat($sheet, "C5:H{$row}");
+        $this->autoSize($sheet, 'H');
+
+        return $this->xlsx($spreadsheet, 'trial-balance.xlsx');
+    }
+
+    public function incomeStatementExcel(Request $request): StreamedResponse
+    {
+        ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+        $data = $this->incomeStatementData($from, $to);
+
+        [$spreadsheet, $sheet] = $this->newSheet('قائمة الدخل');
+        $this->titleRows($sheet, 'قائمة الدخل', "عن الفترة من {$from} إلى {$to}");
+
+        $sheet->fromArray(['الرمز', 'الحساب', 'صافي'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:C4');
+        $row = 5;
+
+        $section = function (string $label) use ($sheet, &$row) {
+            $sheet->setCellValue("A{$row}", $label);
+            $sheet->getStyle("A{$row}:C{$row}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            ]);
+            $row++;
+        };
+
+        $section('الإيرادات');
+        foreach ($data['revenue'] as $r) {
+            $sheet->fromArray([$r['code'], $r['name'], (float) $r['net']], null, "A{$row}");
+            $row++;
+        }
+        $sheet->setCellValue("B{$row}", 'إجمالي الإيرادات');
+        $sheet->setCellValue("C{$row}", (float) $data['total_revenue']);
+        $this->styleTotals($sheet, "A{$row}:C{$row}");
+        $row += 2;
+
+        $section('المصروفات');
+        foreach ($data['expenses'] as $r) {
+            $sheet->fromArray([$r['code'], $r['name'], (float) $r['net']], null, "A{$row}");
+            $row++;
+        }
+        $sheet->setCellValue("B{$row}", 'إجمالي المصروفات');
+        $sheet->setCellValue("C{$row}", (float) $data['total_expense']);
+        $this->styleTotals($sheet, "A{$row}:C{$row}");
+        $row += 2;
+
+        $sheet->setCellValue("B{$row}", $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة');
+        $sheet->setCellValue("C{$row}", abs((float) $data['net_profit']));
+        $sheet->getStyle("A{$row}:C{$row}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $data['is_profit'] ? '16A34A' : 'DC2626']],
+        ]);
+
+        $this->numberFormat($sheet, "C5:C{$row}");
+        $this->autoSize($sheet, 'C');
+
+        return $this->xlsx($spreadsheet, 'income-statement.xlsx');
+    }
+
+    public function balanceSheetExcel(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'as_of' => ['nullable', 'date'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+        $fyId = $request->input('fiscal_year_id') ? (int) $request->input('fiscal_year_id') : null;
+        $asOf = $fyId
+            ? FiscalYear::findOrFail($fyId)->end_date->toDateString()
+            : $request->input('as_of', now()->toDateString());
+        $data = $this->balanceSheetData($asOf, $fyId);
+
+        [$spreadsheet, $sheet] = $this->newSheet('الميزانية العمومية');
+        $this->titleRows($sheet, 'الميزانية العمومية', "كما في تاريخ {$asOf}");
+
+        $sheet->fromArray(['الحساب', 'الرصيد'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:B4');
+        $row = 5;
+
+        $section = function (string $label) use ($sheet, &$row) {
+            $sheet->setCellValue("A{$row}", $label);
+            $sheet->getStyle("A{$row}:B{$row}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            ]);
+            $row++;
+        };
+        $total = function (string $label, string $value) use ($sheet, &$row) {
+            $sheet->setCellValue("A{$row}", $label);
+            $sheet->setCellValue("B{$row}", (float) $value);
+            $this->styleTotals($sheet, "A{$row}:B{$row}");
+            $row++;
+        };
+
+        $section('الأصول');
+        foreach ($data['assets'] as $r) {
+            $sheet->fromArray([$r['name'], (float) $r['balance']], null, "A{$row}");
+            $row++;
+        }
+        $total('إجمالي الأصول', $data['total_assets']);
+        $row++;
+
+        $section('الخصوم');
+        foreach ($data['liabilities'] as $r) {
+            $sheet->fromArray([$r['name'], (float) $r['balance']], null, "A{$row}");
+            $row++;
+        }
+        $total('إجمالي الخصوم', $data['total_liabilities']);
+        $row++;
+
+        $section('حقوق الملكية');
+        foreach ($data['equity'] as $r) {
+            $sheet->fromArray([$r['name'], (float) $r['balance']], null, "A{$row}");
+            $row++;
+        }
+        $sheet->setCellValue("A{$row}", $data['is_profit'] ? 'صافي الربح' : 'صافي الخسارة');
+        $sheet->setCellValue("B{$row}", abs((float) $data['net_profit']));
+        $row++;
+        $total('إجمالي حقوق الملكية', $data['total_equity_net']);
+        $row++;
+
+        $sheet->setCellValue("A{$row}", $data['balanced'] ? 'الميزانية متوازنة (الأصول = الخصوم + حقوق الملكية)' : 'غير متوازنة');
+        $sheet->setCellValue("B{$row}", (float) $data['total_liab_equity']);
+        $sheet->getStyle("A{$row}:B{$row}")->applyFromArray([
+            'font' => ['bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => $data['balanced'] ? 'DCFCE7' : 'FEE2E2']],
+        ]);
+
+        $this->numberFormat($sheet, "B5:B{$row}");
+        $this->autoSize($sheet, 'B');
+
+        return $this->xlsx($spreadsheet, 'balance-sheet.xlsx');
+    }
+
+    public function balanceSheetHorizontalExcel(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'from_as_of' => ['nullable', 'date'],
+            'from_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+            'to_as_of' => ['nullable', 'date'],
+            'to_fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+        $data = $this->balanceSheetHorizontalData($request);
+
+        [$spreadsheet, $sheet] = $this->newSheet('التحليل الأفقي');
+        $this->titleRows($sheet, 'التحليل الأفقي — قائمة المركز المالي', "من {$data['from_as_of']} إلى {$data['to_as_of']}");
+
+        $sheet->fromArray(['الحساب', $data['from_as_of'], $data['to_as_of'], 'الفرق', '% الفرق'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:E4');
+        $row = 5;
+
+        $section = function (string $label) use ($sheet, &$row) {
+            $sheet->setCellValue("A{$row}", $label);
+            $sheet->getStyle("A{$row}:E{$row}")->applyFromArray([
+                'font' => ['bold' => true],
+                'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E2E8F0']],
+            ]);
+            $row++;
+        };
+        $line = function (array $r) use ($sheet, &$row) {
+            $sheet->fromArray([
+                $r['name'], (float) $r['from'], (float) $r['to'], (float) $r['diff'],
+                $r['percent'] === null ? '—' : $r['percent'] / 100,
+            ], null, "A{$row}");
+            if ($r['percent'] !== null) {
+                $sheet->getStyle("E{$row}")->getNumberFormat()->setFormatCode('0.0%');
+            }
+            $row++;
+        };
+        $total = function (string $label, array $t) use ($sheet, &$row) {
+            $sheet->fromArray([
+                $label, (float) $t['from'], (float) $t['to'], (float) $t['diff'],
+                $t['percent'] === null ? '—' : $t['percent'] / 100,
+            ], null, "A{$row}");
+            $this->styleTotals($sheet, "A{$row}:E{$row}");
+            if ($t['percent'] !== null) {
+                $sheet->getStyle("E{$row}")->getNumberFormat()->setFormatCode('0.0%');
+            }
+            $row++;
+        };
+
+        $section('الأصول المتداولة');
+        foreach ($data['current_assets'] as $r) {
+            $line($r);
+        }
+        $total('إجمالي الأصول المتداولة', $data['totals']['total_current_assets']);
+        $row++;
+
+        $section('الأصول الثابتة');
+        foreach ($data['non_current_assets'] as $r) {
+            $line($r);
+        }
+        $total('إجمالي الأصول الثابتة', $data['totals']['total_non_current_assets']);
+        $total('إجمالي الموجودات', $data['totals']['total_assets']);
+        $row++;
+
+        $section('الخصوم المتداولة');
+        foreach ($data['current_liabilities'] as $r) {
+            $line($r);
+        }
+        $total('إجمالي الخصوم المتداولة', $data['totals']['total_current_liabilities']);
+        $row++;
+
+        if (count($data['long_term_liabilities'])) {
+            $section('الخصوم طويلة الأجل');
+            foreach ($data['long_term_liabilities'] as $r) {
+                $line($r);
+            }
+            $total('إجمالي الخصوم طويلة الأجل', $data['totals']['total_long_term_liabilities']);
+            $row++;
+        }
+
+        $section('حقوق الملكية');
+        foreach ($data['equity'] as $r) {
+            $line($r);
+        }
+        $total('إجمالي حقوق الملكية', $data['totals']['total_equity_net']);
+        $total('إجمالي المطاليب وحقوق الملكية', $data['totals']['total_liab_equity']);
+
+        $this->numberFormat($sheet, "B5:D{$row}");
+        $this->autoSize($sheet, 'E');
+
+        return $this->xlsx($spreadsheet, 'balance-sheet-horizontal.xlsx');
+    }
+
+    public function statementOfEquityExcel(Request $request): StreamedResponse
+    {
+        ['from' => $from, 'to' => $to, 'fiscal_year_id' => $fyId] = $this->validateDateRange($request);
+        $data = $this->statementOfEquityData($from, $to, $fyId);
+
+        [$spreadsheet, $sheet] = $this->newSheet('التغير في حقوق الملكية');
+        $this->titleRows($sheet, 'قائمة التغير في حقوق الملكية', "عن الفترة من {$from} إلى {$to}");
+
+        $sheet->fromArray(['البيان', 'المبلغ'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:B4');
+        $row = 5;
+
+        $sheet->fromArray(['رصيد حقوق الملكية في بداية الفترة', (float) $data['beginning_balance']], null, "A{$row}");
+        $row++;
+        $sheet->fromArray([
+            $data['is_profit'] ? 'يضاف: صافي الربح' : 'يخصم: صافي الخسارة',
+            abs((float) $data['net_income']),
+        ], null, "A{$row}");
+        $row += 2;
+
+        if (count($data['movements'])) {
+            $sheet->fromArray(['الحساب', 'إضافات', 'مسحوبات', 'الصافي'], null, "A{$row}");
+            $this->styleHeader($sheet, "A{$row}:D{$row}");
+            $row++;
+            foreach ($data['movements'] as $r) {
+                $sheet->fromArray([
+                    $r['name'], (float) $r['contributions'], (float) $r['withdrawals'], (float) $r['net'],
+                ], null, "A{$row}");
+                $row++;
+            }
+            $sheet->fromArray([
+                'الإجمالي', (float) $data['total_contributions'], (float) $data['total_withdrawals'], (float) $data['net_movement'],
+            ], null, "A{$row}");
+            $this->styleTotals($sheet, "A{$row}:D{$row}");
+            $this->numberFormat($sheet, 'B'.($row - count($data['movements'])).":D{$row}");
+            $row += 2;
+        }
+
+        $sheet->setCellValue("A{$row}", 'رصيد حقوق الملكية في نهاية الفترة');
+        $sheet->setCellValue("B{$row}", (float) $data['ending_balance']);
+        $sheet->getStyle("A{$row}:B{$row}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '7C3AED']],
+        ]);
+
+        $this->numberFormat($sheet, "B5:B{$row}");
+        $this->autoSize($sheet, 'D');
+
+        return $this->xlsx($spreadsheet, 'statement-of-equity.xlsx');
+    }
+
+    // ─────────────────────────── Excel helpers ──────────────────────────────────
+
+    /** @return array{0: Spreadsheet, 1: Worksheet} */
+    private function newSheet(string $title): array
+    {
+        $spreadsheet = new Spreadsheet;
+        $sheet = $spreadsheet->getActiveSheet();
+        $sheet->setTitle(mb_substr($title, 0, 31));
+        $sheet->setRightToLeft(true);
+
+        return [$spreadsheet, $sheet];
+    }
+
+    private function titleRows(Worksheet $sheet, string $title, string $subtitle): void
+    {
+        $sheet->setCellValue('A1', $title);
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $sheet->setCellValue('A2', $subtitle);
+        $sheet->getStyle('A2')->getFont()->setItalic(true);
+    }
+
+    private function styleHeader(Worksheet $sheet, string $range): void
+    {
+        $sheet->getStyle($range)->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1565C0']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+    }
+
+    private function styleTotals(Worksheet $sheet, string $range): void
+    {
+        $sheet->getStyle($range)->applyFromArray([
+            'font' => ['bold' => true],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
+        ]);
+    }
+
+    private function numberFormat(Worksheet $sheet, string $range): void
+    {
+        $sheet->getStyle($range)->getNumberFormat()->setFormatCode('#,##0.00');
+    }
+
+    private function autoSize(Worksheet $sheet, string $lastCol): void
+    {
+        foreach (range('A', $lastCol) as $col) {
+            $sheet->getColumnDimension($col)->setAutoSize(true);
+        }
+    }
+
+    private function xlsx(Spreadsheet $spreadsheet, string $filename): StreamedResponse
+    {
+        $writer = new Xlsx($spreadsheet);
+
+        return response()->streamDownload(function () use ($writer) {
+            $writer->save('php://output');
+        }, $filename, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ]);
     }
 
     // ─────────────────────────── Private query helpers ──────────────────────────

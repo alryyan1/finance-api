@@ -331,14 +331,14 @@ class PdfReport extends TCPDF
         return mb_substr($text, 0, $lo).$ellipsis;
     }
 
-    /** Totals row */
-    public function totalsRow(array $values, array $widths, int $h = 7): void
+    /** Totals row. $stretch is passed to Cell() so an over-long value scales down to fit its column instead of bleeding into the next. */
+    public function totalsRow(array $values, array $widths, int $h = 7, int $stretch = 1): void
     {
         $this->SetFont('arialbd', '', 9);
         $this->SetFillColor(241, 245, 249);
         $this->SetTextColor(0, 0, 0);
         foreach (array_map(null, $values, $widths) as [$val, $w]) {
-            $this->Cell($w, $h, $val, 1, 0, 'C', true);
+            $this->Cell($w, $h, $val, 1, 0, 'C', true, '', $stretch);
         }
         $this->Ln();
         $this->SetFillColor(255, 255, 255);

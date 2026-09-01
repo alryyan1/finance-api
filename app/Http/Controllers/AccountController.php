@@ -15,6 +15,11 @@ class AccountController extends Controller
         return response()->json(Account::orderBy('code')->get());
     }
 
+    public function show(Account $account): JsonResponse
+    {
+        return response()->json($account);
+    }
+
     public function store(Request $request, FirestoreApprovalService $firestore): JsonResponse
     {
         $validated = $request->validate([
