@@ -709,7 +709,7 @@ class ReportController extends Controller
         $data = $this->trialBalanceData($from, $to, $fyId);
 
         [$spreadsheet, $sheet] = $this->newSheet('ميزان المراجعة');
-        $this->titleRows($sheet, 'ميزان المراجعة', "الفترة من {$from} إلى {$to}");
+        $this->titleRows($sheet, 'ميزان المراجعة', "الفترة من {$from} إلى {$to}", 'H');
 
         $headers = ['الرمز', 'اسم الحساب', 'رصيد أول الفترة (مدين)', 'رصيد أول الفترة (دائن)', 'مدين الفترة', 'دائن الفترة', 'رصيد مدين', 'رصيد دائن'];
         $sheet->fromArray($headers, null, 'A4');
@@ -764,7 +764,7 @@ class ReportController extends Controller
         $data = $this->incomeStatementData($from, $to);
 
         [$spreadsheet, $sheet] = $this->newSheet('قائمة الدخل');
-        $this->titleRows($sheet, 'قائمة الدخل', "عن الفترة من {$from} إلى {$to}");
+        $this->titleRows($sheet, 'قائمة الدخل', "عن الفترة من {$from} إلى {$to}", 'C');
 
         $sheet->fromArray(['الرمز', 'الحساب', 'صافي'], null, 'A4');
         $this->styleHeader($sheet, 'A4:C4');
@@ -825,7 +825,7 @@ class ReportController extends Controller
         $data = $this->balanceSheetData($asOf, $fyId);
 
         [$spreadsheet, $sheet] = $this->newSheet('الميزانية العمومية');
-        $this->titleRows($sheet, 'الميزانية العمومية', "كما في تاريخ {$asOf}");
+        $this->titleRows($sheet, 'الميزانية العمومية', "كما في تاريخ {$asOf}", 'B');
 
         $sheet->fromArray(['الحساب', 'الرصيد'], null, 'A4');
         $this->styleHeader($sheet, 'A4:B4');
@@ -897,7 +897,7 @@ class ReportController extends Controller
         $data = $this->balanceSheetHorizontalData($request);
 
         [$spreadsheet, $sheet] = $this->newSheet('التحليل الأفقي');
-        $this->titleRows($sheet, 'التحليل الأفقي — قائمة المركز المالي', "من {$data['from_as_of']} إلى {$data['to_as_of']}");
+        $this->titleRows($sheet, 'التحليل الأفقي — قائمة المركز المالي', "من {$data['from_as_of']} إلى {$data['to_as_of']}", 'E');
 
         $sheet->fromArray(['الحساب', $data['from_as_of'], $data['to_as_of'], 'الفرق', '% الفرق'], null, 'A4');
         $this->styleHeader($sheet, 'A4:E4');
@@ -983,7 +983,7 @@ class ReportController extends Controller
         $data = $this->statementOfEquityData($from, $to, $fyId);
 
         [$spreadsheet, $sheet] = $this->newSheet('التغير في حقوق الملكية');
-        $this->titleRows($sheet, 'قائمة التغير في حقوق الملكية', "عن الفترة من {$from} إلى {$to}");
+        $this->titleRows($sheet, 'قائمة التغير في حقوق الملكية', "عن الفترة من {$from} إلى {$to}", 'D');
 
         $sheet->fromArray(['البيان', 'المبلغ'], null, 'A4');
         $this->styleHeader($sheet, 'A4:B4');
@@ -1041,12 +1041,18 @@ class ReportController extends Controller
         return [$spreadsheet, $sheet];
     }
 
-    private function titleRows(Worksheet $sheet, string $title, string $subtitle): void
+    private function titleRows(Worksheet $sheet, string $title, string $subtitle, string $lastCol = 'A'): void
     {
         $sheet->setCellValue('A1', $title);
         $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
         $sheet->setCellValue('A2', $subtitle);
         $sheet->getStyle('A2')->getFont()->setItalic(true);
+
+        if ($lastCol !== 'A') {
+            $sheet->mergeCells("A1:{$lastCol}1");
+            $sheet->mergeCells("A2:{$lastCol}2");
+        }
+        $sheet->getStyle('A1:A2')->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
     }
 
     private function styleHeader(Worksheet $sheet, string $range): void
