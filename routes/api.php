@@ -84,6 +84,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/trial-balance/excel', [ReportController::class, 'trialBalanceExcel'])->middleware('permission:reports.export');
     Route::get('reports/ledger', [ReportController::class, 'ledger'])->middleware('permission:reports.view');
     Route::get('reports/ledger/pdf', [ReportController::class, 'ledgerPdf'])->middleware('permission:reports.export');
+    Route::get('reports/ledger/excel', [ReportController::class, 'ledgerExcel'])->middleware('permission:reports.export');
     Route::get('reports/income-statement', [ReportController::class, 'incomeStatement'])->middleware('permission:reports.view');
     Route::get('reports/income-statement/pdf', [ReportController::class, 'incomeStatementPdf'])->middleware('permission:reports.export');
     Route::get('reports/income-statement/excel', [ReportController::class, 'incomeStatementExcel'])->middleware('permission:reports.export');

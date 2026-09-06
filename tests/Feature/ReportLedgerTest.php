@@ -94,6 +94,32 @@ class ReportLedgerTest extends TestCase
         $response->assertHeader('content-type', 'application/pdf');
     }
 
+    public function test_ledger_excel_downloads_as_a_spreadsheet(): void
+    {
+        OpeningBalance::create([
+            'fiscal_year_id' => $this->fiscalYear->id,
+            'account_id' => $this->cashAccount->id,
+            'debit' => 5000,
+            'credit' => 0,
+        ]);
+
+        $entry = JournalEntry::create(['date' => '2026-08-10', 'description' => 'Purchase', 'is_posted' => true]);
+        $entry->lines()->createMany([
+            ['account_id' => $this->cashAccount->id, 'debit' => 0, 'credit' => 300],
+            ['account_id' => $this->cashAccount->id, 'debit' => 300, 'credit' => 0],
+        ]);
+
+        $response = $this->actingAs($this->user)->get('/api/reports/ledger/excel?'.http_build_query([
+            'account_id' => $this->cashAccount->id,
+            'from' => '2026-08-01',
+            'to' => '2026-08-31',
+            'fiscal_year_id' => $this->fiscalYear->id,
+        ]));
+
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }
+
     public function test_trial_balance_pdf_uses_opening_balance_for_the_selected_fiscal_year(): void
     {
         OpeningBalance::create([

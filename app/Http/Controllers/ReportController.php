@@ -758,6 +758,71 @@ class ReportController extends Controller
         return $this->xlsx($spreadsheet, 'trial-balance.xlsx');
     }
 
+    public function ledgerExcel(Request $request): StreamedResponse
+    {
+        $request->validate([
+            'account_id' => ['required', 'integer', 'exists:accounts,id'],
+            'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date', 'after_or_equal:from'],
+            'fiscal_year_id' => ['nullable', 'integer', 'exists:fiscal_years,id'],
+        ]);
+        [$from, $to] = $this->resolveDates($request, now()->startOfYear()->toDateString(), now()->toDateString());
+        $fyId = $request->input('fiscal_year_id') ? (int) $request->input('fiscal_year_id') : null;
+        $data = $this->ledgerData(
+            (int) $request->input('account_id'),
+            $from,
+            $to,
+            $request->input('party_id') ? (int) $request->input('party_id') : null,
+            $fyId
+        );
+
+        $acct = $data['account'];
+        $sideLabel = fn (string $s) => $s === 'debit' ? 'مدين' : 'دائن';
+
+        [$spreadsheet, $sheet] = $this->newSheet('كشف حساب');
+        $this->titleRows($sheet, 'كشف حساب: '.$acct['name'], "من {$from} إلى {$to}", 'H');
+
+        $sheet->fromArray(['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد', 'جهة الرصيد'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:H4');
+        $row = 5;
+
+        // Opening balance row
+        $sheet->fromArray([
+            $from, '', 'رصيد افتتاحي', '', null, null,
+            (float) $data['opening_balance'], $sideLabel($data['opening_side']),
+        ], null, "A{$row}");
+        $this->styleTotals($sheet, "A{$row}:H{$row}");
+        $row++;
+
+        foreach ($data['rows'] as $r) {
+            $sheet->fromArray([
+                $r['date'],
+                $r['reference'] ?? '',
+                $r['entry_description'],
+                $r['party_name'] ?? '',
+                (float) $r['debit'] > 0 ? (float) $r['debit'] : null,
+                (float) $r['credit'] > 0 ? (float) $r['credit'] : null,
+                (float) $r['balance'],
+                $sideLabel($r['balance_side']),
+            ], null, "A{$row}");
+            $row++;
+        }
+
+        $sheet->setCellValue("A{$row}", 'الإجمالي');
+        $sheet->mergeCells("A{$row}:D{$row}");
+        $sheet->setCellValue("E{$row}", (float) $data['totals']['debit']);
+        $sheet->setCellValue("F{$row}", (float) $data['totals']['credit']);
+        $sheet->setCellValue("G{$row}", (float) $data['closing_balance']);
+        $sheet->setCellValue("H{$row}", $sideLabel($data['closing_side']));
+        $this->styleTotals($sheet, "A{$row}:H{$row}");
+
+        $this->numberFormat($sheet, "E5:G{$row}");
+        $this->autoSize($sheet, 'H');
+
+        return $this->xlsx($spreadsheet, 'ledger.xlsx');
+    }
+
     public function incomeStatementExcel(Request $request): StreamedResponse
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
