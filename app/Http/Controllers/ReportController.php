@@ -211,50 +211,72 @@ class ReportController extends Controller
         );
 
         // Whole-number money: these amounts carry no meaningful fractional part,
-        // and the trailing ".00" only pushed the numeric columns past their width
-        // so adjacent values ran together.
+        // and the trailing ".00" only pushed the numeric columns past their width.
         $money = fn ($v) => number_format(round((float) $v), 0, '.', ',');
+        // The debit/credit side gets its own column. Appending " م"/" د" onto the
+        // balance number let the bidi algorithm reorder the digits around the
+        // Arabic letter (e.g. "2,693,730 م" came out as "693,730,2 م").
+        $sideWord = fn (string $s) => $s === 'debit' ? 'مدين' : 'دائن';
 
-        // Widths (mm) sum to 190 (A4 portrait content width). The three numeric
-        // columns are wide enough for 8-digit thousands-separated values plus the
-        // trailing " م"/" د" side marker; text cells are truncated with fit().
-        $cols = [20, 15, 50, 28, 25, 25, 27];
-        $pdf->tableHead(['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد'], $cols);
+        // Widths (mm) sum to 190 (A4 portrait content width). البيان and الطرف
+        // wrap onto as many lines as they need (MultiCell); every other column
+        // is single-line.
+        $cols = [18, 13, 46, 24, 24, 24, 26, 15];
+        $headers = ['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد', 'الجهة'];
+        $pdf->tableHead($headers, $cols);
+
+        $pageBottom = $pdf->getPageHeight() - 20;
 
         // Opening balance row
-        $obSide = $data['opening_side'] === 'debit' ? ' م' : ' د';
         $pdf->SetFillColor(241, 245, 249);
         $pdf->SetFont('arial', '', 8);
-        $pdf->Cell($cols[0], 6, $from, 1, 0, 'C', true);
-        $pdf->Cell($cols[1], 6, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[2], 6, 'رصيد افتتاحي', 1, 0, 'R', true);
-        $pdf->Cell($cols[3], 6, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[4], 6, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[5], 6, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[6], 6, $money($data['opening_balance']).$obSide, 1, 1, 'C', true, '', 1);
-        $pdf->SetFont('arial', '', 9);
+        $pdf->Cell($cols[0], 7, $from, 1, 0, 'C', true);
+        $pdf->Cell($cols[1], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($cols[2], 7, 'رصيد افتتاحي', 1, 0, 'R', true);
+        $pdf->Cell($cols[3], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($cols[4], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($cols[5], 7, '', 1, 0, 'C', true);
+        $pdf->Cell($cols[6], 7, $money($data['opening_balance']), 1, 0, 'C', true, '', 1);
+        $pdf->Cell($cols[7], 7, $sideWord($data['opening_side']), 1, 1, 'C', true);
 
+        $pdf->SetFont('arial', '', 8);
         $odd = false;
         foreach ($data['rows'] as $row) {
+            $desc = trim((string) $row['entry_description']) ?: '—';
+            $party = trim((string) ($row['party_name'] ?? '')) ?: '—';
+
+            $nLines = max(
+                (int) $pdf->getNumLines($desc, $cols[2] - 2),
+                (int) $pdf->getNumLines($party, $cols[3] - 2),
+                1
+            );
+            $h = max(7, $nLines * 4 + 2);
+
+            if ($pdf->GetY() + $h > $pageBottom) {
+                $pdf->AddPage();
+                $pdf->tableHead($headers, $cols);
+                $pdf->SetFont('arial', '', 8);
+            }
+
             $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
-            $side = $row['balance_side'] === 'debit' ? ' م' : ' د';
             $debit = (float) $row['debit'] > 0 ? $money($row['debit']) : '—';
             $credit = (float) $row['credit'] > 0 ? $money($row['credit']) : '—';
+            $y = $pdf->GetY();
 
-            $pdf->Cell($cols[0], 7, $row['date'], 1, 0, 'C', true);
-            $pdf->Cell($cols[1], 7, $row['reference'] ?? '—', 1, 0, 'C', true);
-            $pdf->Cell($cols[2], 7, $pdf->fit((string) $row['entry_description'], $cols[2] - 3), 1, 0, 'R', true);
-            $pdf->Cell($cols[3], 7, $pdf->fit((string) ($row['party_name'] ?? '—'), $cols[3] - 3), 1, 0, 'R', true);
-            $pdf->Cell($cols[4], 7, $debit, 1, 0, 'C', true, '', 1);
-            $pdf->Cell($cols[5], 7, $credit, 1, 0, 'C', true, '', 1);
-            $pdf->Cell($cols[6], 7, $money($row['balance']).$side, 1, 1, 'C', true, '', 1);
+            $pdf->MultiCell($cols[0], $h, $row['date'], 1, 'C', true, 0, '', $y, true, 0, false, true, $h, 'M');
+            $pdf->MultiCell($cols[1], $h, $row['reference'] ?? '—', 1, 'C', true, 0, '', $y, true, 0, false, true, $h, 'M');
+            $pdf->MultiCell($cols[2], $h, $desc, 1, 'R', true, 0, '', $y, true, 0, false, true, $h, 'M');
+            $pdf->MultiCell($cols[3], $h, $party, 1, 'R', true, 0, '', $y, true, 0, false, true, $h, 'M');
+            $pdf->MultiCell($cols[4], $h, $debit, 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
+            $pdf->MultiCell($cols[5], $h, $credit, 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
+            $pdf->MultiCell($cols[6], $h, $money($row['balance']), 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
+            $pdf->MultiCell($cols[7], $h, $sideWord($row['balance_side']), 1, 'C', true, 1, '', $y, true, 0, false, true, $h, 'M');
             $odd = ! $odd;
         }
 
-        $clSide = $data['closing_side'] === 'debit' ? ' م' : ' د';
         $pdf->totalsRow(
-            ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance']).$clSide],
-            [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6]]
+            ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance']), $sideWord($data['closing_side'])],
+            [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6], $cols[7]]
         );
 
         return $pdf->respond('ledger.pdf');
