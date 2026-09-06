@@ -226,6 +226,9 @@ class ReportController extends Controller
         $pdf->tableHead($headers, $cols);
 
         $pageBottom = $pdf->getPageHeight() - 20;
+        // RTL: MultiCell's $x is measured from the physical right edge, so each
+        // cell's x is the right margin plus the widths of the columns before it.
+        $rM = $pdf->getMargins()['right'];
 
         // Opening balance row
         $pdf->SetFillColor(241, 245, 249);
@@ -263,14 +266,27 @@ class ReportController extends Controller
             $credit = (float) $row['credit'] > 0 ? $money($row['credit']) : '—';
             $y = $pdf->GetY();
 
-            $pdf->MultiCell($cols[0], $h, $row['date'], 1, 'C', true, 0, '', $y, true, 0, false, true, $h, 'M');
-            $pdf->MultiCell($cols[1], $h, $row['reference'] ?? '—', 1, 'C', true, 0, '', $y, true, 0, false, true, $h, 'M');
-            $pdf->MultiCell($cols[2], $h, $desc, 1, 'R', true, 0, '', $y, true, 0, false, true, $h, 'M');
-            $pdf->MultiCell($cols[3], $h, $party, 1, 'R', true, 0, '', $y, true, 0, false, true, $h, 'M');
-            $pdf->MultiCell($cols[4], $h, $debit, 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
-            $pdf->MultiCell($cols[5], $h, $credit, 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
-            $pdf->MultiCell($cols[6], $h, $money($row['balance']), 1, 'C', true, 0, '', $y, true, 1, false, true, $h, 'M');
-            $pdf->MultiCell($cols[7], $h, $sideWord($row['balance_side']), 1, 'C', true, 1, '', $y, true, 0, false, true, $h, 'M');
+            // Place every cell at an explicit (x, y). Chaining MultiCell through
+            // the cursor is unreliable in RTL mode — the x/y left behind after
+            // one call is not where the next cell should start — which made the
+            // rows overlap. $stretch = 1 on the numeric columns so a wide value
+            // scales down instead of wrapping.
+            $rowCells = [
+                [$cols[0], $row['date'], 'C', 0],
+                [$cols[1], $row['reference'] ?? '—', 'C', 0],
+                [$cols[2], $desc, 'R', 0],
+                [$cols[3], $party, 'R', 0],
+                [$cols[4], $debit, 'C', 1],
+                [$cols[5], $credit, 'C', 1],
+                [$cols[6], $money($row['balance']), 'C', 1],
+                [$cols[7], $sideWord($row['balance_side']), 'C', 0],
+            ];
+            $x = $rM;
+            foreach ($rowCells as [$cw, $txt, $align, $stretch]) {
+                $pdf->MultiCell($cw, $h, $txt, 1, $align, true, 0, $x, $y, true, $stretch, false, true, $h, 'M');
+                $x += $cw;
+            }
+            $pdf->SetXY($rM, $y + $h);
             $odd = ! $odd;
         }
 
@@ -284,13 +300,15 @@ class ReportController extends Controller
 
     /**
      * "General Ledger" styled PDF — mirrors the on-screen GeneralLedgerView:
-     * bilingual title bar, red Account No./Name row, LTR columns with Dr/Cr balance.
+     * bilingual title bar, red Account No./Name row, RTL columns (Date on the
+     * right, Balance on the left) with Dr/Cr balance.
      */
     private function ledgerPdfGl(array $data, string $from, string $to): Response
     {
         $acct = $data['account'];
         $pdf = PdfReport::make('كشف حساب: '.$acct['name'], "من {$from} إلى {$to}");
-        $pdf->SetRTL(false);
+        // RTL layout (inherited from PdfReport::make): the columns flow
+        // right-to-left, so the first Cell in each row lands on the right.
 
         $money = fn ($v) => number_format(round((float) $v), 0, '.', ',');
         $sideEn = fn ($s) => $s === 'debit' ? 'Dr' : 'Cr';
@@ -299,6 +317,8 @@ class ReportController extends Controller
         $w = [26, 22, 70, 24, 24, 24];
         $full = array_sum($w);
         $pageBottom = $pdf->getPageHeight() - 20;
+        // RTL: MultiCell's $x is measured from the physical right edge.
+        $rM = $pdf->getMargins()['right'];
 
         // ── Title bar ────────────────────────────────────────────────────────
         $pdf->SetDrawColor(13, 43, 110);
@@ -349,11 +369,14 @@ class ReportController extends Controller
         }
 
         foreach ($data['rows'] as $row) {
-            $parts = array_values(array_filter([
-                $row['entry_description'],
-                $row['line_description'] ?? null,
-                $row['party_name'] ?? null,
-            ], fn ($v) => $v !== null && $v !== ''));
+            $parts = array_values(array_unique(array_filter(
+                array_map(fn ($v) => trim((string) $v), [
+                    $row['entry_description'] ?? null,
+                    $row['line_description'] ?? null,
+                    $row['party_name'] ?? null,
+                ]),
+                fn ($v) => $v !== '',
+            )));
             $desc = implode("\n", $parts);
 
             $nb = max(1, $pdf->getNumLines($desc, $w[2]));
@@ -362,25 +385,27 @@ class ReportController extends Controller
             if ($pdf->GetY() + $h > $pageBottom) {
                 $pdf->AddPage();
             }
-            $x = $pdf->GetX();
             $y = $pdf->GetY();
 
             $debit = (float) $row['debit'] > 0 ? $money($row['debit']) : '—';
             $credit = (float) $row['credit'] > 0 ? $money($row['credit']) : '—';
             $bal = $money($row['balance']).' '.$sideEn($row['balance_side']);
 
-            $cell = function ($i, $txt, $align) use ($pdf, $w, $x, $y, $h) {
+            // Place each cell explicitly ($x from the right edge). Chaining
+            // MultiCell through the cursor is unreliable in RTL mode.
+            $cell = function ($i, $txt, $align) use ($pdf, $w, $rM, $y, $h) {
                 $off = array_sum(array_slice($w, 0, $i));
 
-                return $pdf->MultiCell($w[$i], $h, $txt, 1, $align, false, $i === 5 ? 1 : 0,
-                    $x + $off, $y, true, 0, false, true, $h, 'M');
+                return $pdf->MultiCell($w[$i], $h, $txt, 1, $align, false, 0,
+                    $rM + $off, $y, true, 0, false, true, $h, 'M');
             };
             $cell(0, $row['date'], 'C');
             $cell(1, $row['reference'] ?? '—', 'C');
-            $cell(2, $desc, 'L');
+            $cell(2, $desc, 'R');
             $cell(3, $debit, 'R');
             $cell(4, $credit, 'R');
             $cell(5, $bal, 'R');
+            $pdf->SetXY($rM, $y + $h);
         }
 
         // ── Totals row ──────────────────────────────────────────────────────
