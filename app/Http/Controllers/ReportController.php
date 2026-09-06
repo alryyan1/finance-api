@@ -213,16 +213,12 @@ class ReportController extends Controller
         // Whole-number money: these amounts carry no meaningful fractional part,
         // and the trailing ".00" only pushed the numeric columns past their width.
         $money = fn ($v) => number_format(round((float) $v), 0, '.', ',');
-        // The debit/credit side gets its own column. Appending " م"/" د" onto the
-        // balance number let the bidi algorithm reorder the digits around the
-        // Arabic letter (e.g. "2,693,730 م" came out as "693,730,2 م").
-        $sideWord = fn (string $s) => $s === 'debit' ? 'مدين' : 'دائن';
 
         // Widths (mm) sum to 190 (A4 portrait content width). البيان and الطرف
         // wrap onto as many lines as they need (MultiCell); every other column
         // is single-line.
-        $cols = [18, 13, 46, 24, 24, 24, 26, 15];
-        $headers = ['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد', 'الجهة'];
+        $cols = [18, 13, 55, 30, 24, 24, 26];
+        $headers = ['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد'];
         $pdf->tableHead($headers, $cols);
 
         $pageBottom = $pdf->getPageHeight() - 20;
@@ -239,8 +235,7 @@ class ReportController extends Controller
         $pdf->Cell($cols[3], 7, '', 1, 0, 'C', true);
         $pdf->Cell($cols[4], 7, '', 1, 0, 'C', true);
         $pdf->Cell($cols[5], 7, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[6], 7, $money($data['opening_balance']), 1, 0, 'C', true, '', 1);
-        $pdf->Cell($cols[7], 7, $sideWord($data['opening_side']), 1, 1, 'C', true);
+        $pdf->Cell($cols[6], 7, $money($data['opening_balance']), 1, 1, 'C', true, '', 1);
 
         $pdf->SetFont('arial', '', 8);
         $odd = false;
@@ -279,7 +274,6 @@ class ReportController extends Controller
                 [$cols[4], $debit, 'C', 1],
                 [$cols[5], $credit, 'C', 1],
                 [$cols[6], $money($row['balance']), 'C', 1],
-                [$cols[7], $sideWord($row['balance_side']), 'C', 0],
             ];
             $x = $rM;
             foreach ($rowCells as [$cw, $txt, $align, $stretch]) {
@@ -291,8 +285,8 @@ class ReportController extends Controller
         }
 
         $pdf->totalsRow(
-            ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance']), $sideWord($data['closing_side'])],
-            [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6], $cols[7]]
+            ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance'])],
+            [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6]]
         );
 
         return $pdf->respond('ledger.pdf');
