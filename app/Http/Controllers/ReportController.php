@@ -217,8 +217,8 @@ class ReportController extends Controller
         // Widths (mm) sum to 190 (A4 portrait content width). البيان and الطرف
         // wrap onto as many lines as they need (MultiCell); every other column
         // is single-line.
-        $cols = [18, 13, 55, 30, 24, 24, 26];
-        $headers = ['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد'];
+        $cols = [18, 68, 30, 24, 24, 26];
+        $headers = ['التاريخ', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد'];
         $pdf->tableHead($headers, $cols);
 
         $pageBottom = $pdf->getPageHeight() - 20;
@@ -230,12 +230,11 @@ class ReportController extends Controller
         $pdf->SetFillColor(241, 245, 249);
         $pdf->SetFont('arial', '', 8);
         $pdf->Cell($cols[0], 7, $from, 1, 0, 'C', true);
-        $pdf->Cell($cols[1], 7, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[2], 7, 'رصيد افتتاحي', 1, 0, 'R', true);
+        $pdf->Cell($cols[1], 7, 'رصيد افتتاحي', 1, 0, 'R', true);
+        $pdf->Cell($cols[2], 7, '', 1, 0, 'C', true);
         $pdf->Cell($cols[3], 7, '', 1, 0, 'C', true);
         $pdf->Cell($cols[4], 7, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[5], 7, '', 1, 0, 'C', true);
-        $pdf->Cell($cols[6], 7, $money($data['opening_balance']), 1, 1, 'C', true, '', 1);
+        $pdf->Cell($cols[5], 7, $money($data['opening_balance']), 1, 1, 'C', true, '', 1);
 
         $pdf->SetFont('arial', '', 8);
         $odd = false;
@@ -244,8 +243,8 @@ class ReportController extends Controller
             $party = trim((string) ($row['party_name'] ?? '')) ?: '—';
 
             $nLines = max(
-                (int) $pdf->getNumLines($desc, $cols[2] - 2),
-                (int) $pdf->getNumLines($party, $cols[3] - 2),
+                (int) $pdf->getNumLines($desc, $cols[1] - 2),
+                (int) $pdf->getNumLines($party, $cols[2] - 2),
                 1
             );
             $h = max(7, $nLines * 4 + 2);
@@ -268,12 +267,11 @@ class ReportController extends Controller
             // scales down instead of wrapping.
             $rowCells = [
                 [$cols[0], $row['date'], 'C', 0],
-                [$cols[1], $row['reference'] ?? '—', 'C', 0],
-                [$cols[2], $desc, 'R', 0],
-                [$cols[3], $party, 'R', 0],
-                [$cols[4], $debit, 'C', 1],
-                [$cols[5], $credit, 'C', 1],
-                [$cols[6], $money($row['balance']), 'C', 1],
+                [$cols[1], $desc, 'R', 0],
+                [$cols[2], $party, 'R', 0],
+                [$cols[3], $debit, 'C', 1],
+                [$cols[4], $credit, 'C', 1],
+                [$cols[5], $money($row['balance']), 'C', 1],
             ];
             $x = $rM;
             foreach ($rowCells as [$cw, $txt, $align, $stretch]) {
@@ -286,7 +284,7 @@ class ReportController extends Controller
 
         $pdf->totalsRow(
             ['الإجمالي', $money($data['totals']['debit']), $money($data['totals']['credit']), $money($data['closing_balance'])],
-            [$cols[0] + $cols[1] + $cols[2] + $cols[3], $cols[4], $cols[5], $cols[6]]
+            [$cols[0] + $cols[1] + $cols[2], $cols[3], $cols[4], $cols[5]]
         );
 
         return $pdf->respond('ledger.pdf');
