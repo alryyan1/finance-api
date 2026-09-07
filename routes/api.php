@@ -22,9 +22,13 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('/login', [LoginController::class, 'login']);
 
+// Token-based login for the native mobile app (no cookies/CSRF).
+Route::post('/mobile/login', [LoginController::class, 'mobileLogin']);
+
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('/user', [LoginController::class, 'user']);
     Route::post('/logout', [LoginController::class, 'logout']);
+    Route::post('/mobile/logout', [LoginController::class, 'mobileLogout']);
     Route::put('/user/password', [LoginController::class, 'updatePassword']);
 
     // Personal access tokens (used by external systems like clinic app)

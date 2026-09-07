@@ -36,6 +36,46 @@ class LoginController extends Controller
         ]);
     }
 
+    /**
+     * Token-based login for native clients (mobile app) that can't use the
+     * cookie/session SPA flow. Returns a Sanctum personal access token the
+     * client sends as `Authorization: Bearer <token>` on subsequent requests.
+     */
+    public function mobileLogin(Request $request): JsonResponse
+    {
+        $request->validate([
+            'username' => ['required', 'string'],
+            'password' => ['required', 'string'],
+            'device_name' => ['required', 'string'],
+        ]);
+
+        $user = User::where('username', $request->input('username'))->first();
+
+        if (! $user || ! Hash::check($request->input('password'), $user->password)) {
+            throw ValidationException::withMessages([
+                'username' => ['بيانات الاعتماد المدخلة غير صحيحة.'],
+            ]);
+        }
+
+        $token = $user->createToken($request->input('device_name'));
+
+        return response()->json([
+            'token' => $token->plainTextToken,
+            'user' => $this->withAbilities($user),
+        ]);
+    }
+
+    /**
+     * Revoke only the token used for the current request (single device),
+     * leaving other devices' tokens and the web session untouched.
+     */
+    public function mobileLogout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()->delete();
+
+        return response()->json(['message' => 'تم تسجيل الخروج بنجاح.']);
+    }
+
     public function logout(Request $request): JsonResponse
     {
         Auth::guard('web')->logout();
