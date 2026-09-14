@@ -240,6 +240,9 @@ class ReportController extends Controller
         $odd = false;
         foreach ($data['rows'] as $row) {
             $desc = trim((string) $row['entry_description']) ?: '—';
+            if ($data['is_aggregate']) {
+                $desc .= "\n".$row['account_code'].' — '.$row['account_name'];
+            }
             $party = trim((string) ($row['party_name'] ?? '')) ?: '—';
 
             $nLines = max(
@@ -366,6 +369,7 @@ class ReportController extends Controller
                     $row['entry_description'] ?? null,
                     $row['line_description'] ?? null,
                     $row['party_name'] ?? null,
+                    $data['is_aggregate'] ? $row['account_code'].' — '.$row['account_name'] : null,
                 ]),
                 fn ($v) => $v !== '',
             )));
@@ -818,46 +822,57 @@ class ReportController extends Controller
 
         $acct = $data['account'];
         $sideLabel = fn (string $s) => $s === 'debit' ? 'مدين' : 'دائن';
+        $isAggregate = $data['is_aggregate'];
 
         [$spreadsheet, $sheet] = $this->newSheet('كشف حساب');
-        $this->titleRows($sheet, 'كشف حساب: '.$acct['name'], "من {$from} إلى {$to}", 'H');
+        $lastCol = $isAggregate ? 'I' : 'H';
+        $this->titleRows($sheet, 'كشف حساب: '.$acct['name'], "من {$from} إلى {$to}", $lastCol);
 
-        $sheet->fromArray(['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد', 'جهة الرصيد'], null, 'A4');
-        $this->styleHeader($sheet, 'A4:H4');
+        $headers = ['التاريخ', 'مرجع', 'البيان', 'الطرف', 'مدين', 'دائن', 'الرصيد', 'جهة الرصيد'];
+        if ($isAggregate) {
+            array_splice($headers, 4, 0, ['الحساب']);
+        }
+        $sheet->fromArray($headers, null, 'A4');
+        $this->styleHeader($sheet, "A4:{$lastCol}4");
         $row = 5;
 
         // Opening balance row
-        $sheet->fromArray([
-            $from, '', 'رصيد افتتاحي', '', null, null,
-            (float) $data['opening_balance'], $sideLabel($data['opening_side']),
-        ], null, "A{$row}");
-        $this->styleTotals($sheet, "A{$row}:H{$row}");
+        $openingRow = [$from, '', 'رصيد افتتاحي', ''];
+        if ($isAggregate) {
+            $openingRow[] = '';
+        }
+        $openingRow = array_merge($openingRow, [null, null, (float) $data['opening_balance'], $sideLabel($data['opening_side'])]);
+        $sheet->fromArray($openingRow, null, "A{$row}");
+        $this->styleTotals($sheet, "A{$row}:{$lastCol}{$row}");
         $row++;
 
         foreach ($data['rows'] as $r) {
-            $sheet->fromArray([
-                $r['date'],
-                $r['reference'] ?? '',
-                $r['entry_description'],
-                $r['party_name'] ?? '',
+            $rowValues = [$r['date'], $r['reference'] ?? '', $r['entry_description'], $r['party_name'] ?? ''];
+            if ($isAggregate) {
+                $rowValues[] = $r['account_code'].' — '.$r['account_name'];
+            }
+            $rowValues = array_merge($rowValues, [
                 (float) $r['debit'] > 0 ? (float) $r['debit'] : null,
                 (float) $r['credit'] > 0 ? (float) $r['credit'] : null,
                 (float) $r['balance'],
                 $sideLabel($r['balance_side']),
-            ], null, "A{$row}");
+            ]);
+            $sheet->fromArray($rowValues, null, "A{$row}");
             $row++;
         }
 
+        $labelEndCol = $isAggregate ? 'E' : 'D';
+        [$debitCol, $creditCol, $balanceCol, $sideCol] = $isAggregate ? ['F', 'G', 'H', 'I'] : ['E', 'F', 'G', 'H'];
         $sheet->setCellValue("A{$row}", 'الإجمالي');
-        $sheet->mergeCells("A{$row}:D{$row}");
-        $sheet->setCellValue("E{$row}", (float) $data['totals']['debit']);
-        $sheet->setCellValue("F{$row}", (float) $data['totals']['credit']);
-        $sheet->setCellValue("G{$row}", (float) $data['closing_balance']);
-        $sheet->setCellValue("H{$row}", $sideLabel($data['closing_side']));
-        $this->styleTotals($sheet, "A{$row}:H{$row}");
+        $sheet->mergeCells("A{$row}:{$labelEndCol}{$row}");
+        $sheet->setCellValue("{$debitCol}{$row}", (float) $data['totals']['debit']);
+        $sheet->setCellValue("{$creditCol}{$row}", (float) $data['totals']['credit']);
+        $sheet->setCellValue("{$balanceCol}{$row}", (float) $data['closing_balance']);
+        $sheet->setCellValue("{$sideCol}{$row}", $sideLabel($data['closing_side']));
+        $this->styleTotals($sheet, "A{$row}:{$lastCol}{$row}");
 
-        $this->numberFormat($sheet, "E5:G{$row}");
-        $this->autoSize($sheet, 'H');
+        $this->numberFormat($sheet, "{$debitCol}5:{$balanceCol}{$row}");
+        $this->autoSize($sheet, $sideCol);
 
         return $this->xlsx($spreadsheet, 'ledger.xlsx');
     }
@@ -1335,19 +1350,45 @@ class ReportController extends Controller
         ];
     }
 
+    /**
+     * The account's own id plus every id under it in the parent/child tree
+     * (any depth). Parent accounts never receive postings directly — see
+     * JournalEntryFormPage's getOptionDisabled — so a parent's statement is
+     * only meaningful as the combined ledger of its descendants.
+     *
+     * @return array<int, int>
+     */
+    private function descendantAccountIds(int $accountId): array
+    {
+        $ids = [$accountId];
+        $frontier = [$accountId];
+        while ($frontier !== []) {
+            $children = DB::table('accounts')->whereIn('parent_id', $frontier)->pluck('id')->all();
+            if ($children === []) {
+                break;
+            }
+            $ids = array_merge($ids, $children);
+            $frontier = $children;
+        }
+
+        return $ids;
+    }
+
     private function ledgerData(int $accountId, string $from, string $to, ?int $partyId = null, ?int $fiscalYearId = null): array
     {
         $account = Account::findOrFail($accountId);
         $debitNormal = in_array($account->type, ['asset', 'expense']);
+        $accountIds = $this->descendantAccountIds($accountId);
+        $isAggregate = count($accountIds) > 1;
 
         $storedOb = DB::table('opening_balances')
-            ->where('account_id', $accountId)
+            ->whereIn('account_id', $accountIds)
             ->when(
                 $fiscalYearId,
                 fn ($q) => $q->where('fiscal_year_id', $fiscalYearId),
                 fn ($q) => $q->whereNull('fiscal_year_id')
             )
-            ->first();
+            ->selectRaw('SUM(debit) as debit, SUM(credit) as credit')->first();
         $storedObNet = $debitNormal
             ? ((float) ($storedOb->debit ?? 0) - (float) ($storedOb->credit ?? 0))
             : ((float) ($storedOb->credit ?? 0) - (float) ($storedOb->debit ?? 0));
@@ -1357,7 +1398,7 @@ class ReportController extends Controller
         // everything before that date — re-summing it here would double count.
         $prePeriod = $fiscalYearId ? (object) ['d' => 0, 'c' => 0] : DB::table('journal_entry_lines as l')
             ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
-            ->where('l.account_id', $accountId)->where('e.is_posted', true)->where('e.date', '<', $from)
+            ->whereIn('l.account_id', $accountIds)->where('e.is_posted', true)->where('e.date', '<', $from)
             ->when($partyId, fn ($q) => $q->where('l.party_id', $partyId))
             ->selectRaw('SUM(l.debit) as d, SUM(l.credit) as c')->first();
 
@@ -1367,12 +1408,14 @@ class ReportController extends Controller
 
         $lines = DB::table('journal_entry_lines as l')
             ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
+            ->join('accounts as a', 'a.id', '=', 'l.account_id')
             ->leftJoin('parties as p', 'p.id', '=', 'l.party_id')
-            ->where('l.account_id', $accountId)->where('e.is_posted', true)
+            ->whereIn('l.account_id', $accountIds)->where('e.is_posted', true)
             ->whereBetween('e.date', [$from, $to])
             ->when($partyId, fn ($q) => $q->where('l.party_id', $partyId))
             ->select('e.id as entry_id', 'e.date', 'e.reference', 'e.description as entry_description',
-                'l.description as line_description', 'l.debit', 'l.credit', 'p.name as party_name')
+                'l.description as line_description', 'l.debit', 'l.credit', 'p.name as party_name',
+                'a.code as account_code', 'a.name as account_name')
             ->orderBy('e.date')->orderBy('e.id')->orderBy('l.id')->get();
 
         $running = $openingBalance;
@@ -1388,6 +1431,8 @@ class ReportController extends Controller
                 'entry_description' => $line->entry_description,
                 'line_description' => $line->line_description,
                 'party_name' => $line->party_name,
+                'account_code' => $line->account_code,
+                'account_name' => $line->account_name,
                 'debit' => number_format($debit, 2, '.', ''),
                 'credit' => number_format($credit, 2, '.', ''),
                 'balance' => number_format(abs($running), 2, '.', ''),
@@ -1403,6 +1448,7 @@ class ReportController extends Controller
 
         return [
             'account' => ['id' => $account->id, 'code' => $account->code, 'name' => $account->name, 'type' => $account->type],
+            'is_aggregate' => $isAggregate,
             'from' => $from,
             'to' => $to,
             'opening_balance' => number_format(abs($openingBalance), 2, '.', ''),

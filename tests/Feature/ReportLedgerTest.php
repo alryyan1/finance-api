@@ -120,6 +120,49 @@ class ReportLedgerTest extends TestCase
         $response->assertHeader('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     }
 
+    public function test_ledger_for_a_parent_account_aggregates_its_children(): void
+    {
+        $assetsParent = Account::create(['code' => '1100', 'name' => 'Assets', 'type' => 'asset', 'is_active' => true]);
+        $this->cashAccount->update(['parent_id' => $assetsParent->id]);
+        $bankAccount = Account::create(['code' => '1102', 'name' => 'Bank', 'type' => 'asset', 'parent_id' => $assetsParent->id, 'is_active' => true]);
+
+        OpeningBalance::create(['fiscal_year_id' => null, 'account_id' => $this->cashAccount->id, 'debit' => 1000, 'credit' => 0]);
+        OpeningBalance::create(['fiscal_year_id' => null, 'account_id' => $bankAccount->id, 'debit' => 2000, 'credit' => 0]);
+
+        $entry = JournalEntry::create(['date' => '2026-08-10', 'description' => 'Transfer', 'is_posted' => true]);
+        $entry->lines()->createMany([
+            ['account_id' => $this->cashAccount->id, 'debit' => 0, 'credit' => 500],
+            ['account_id' => $bankAccount->id, 'debit' => 500, 'credit' => 0],
+        ]);
+
+        $response = $this->actingAs($this->user)->getJson('/api/reports/ledger?'.http_build_query([
+            'account_id' => $assetsParent->id,
+            'from' => '2026-08-01',
+            'to' => '2026-08-31',
+        ]));
+
+        $response->assertOk();
+        $response->assertJsonPath('is_aggregate', true);
+        $response->assertJsonPath('opening_balance', '3000.00');
+        $response->assertJsonCount(2, 'rows');
+        $accountCodes = collect($response->json('rows'))->pluck('account_code')->sort()->values()->all();
+        $this->assertSame(['1101', '1102'], $accountCodes);
+        // Opening balance unaffected by the in-period transfer between the two children.
+        $response->assertJsonPath('closing_balance', '3000.00');
+    }
+
+    public function test_ledger_for_a_leaf_account_is_not_marked_aggregate(): void
+    {
+        $response = $this->actingAs($this->user)->getJson('/api/reports/ledger?'.http_build_query([
+            'account_id' => $this->cashAccount->id,
+            'from' => '2026-08-01',
+            'to' => '2026-08-31',
+        ]));
+
+        $response->assertOk();
+        $response->assertJsonPath('is_aggregate', false);
+    }
+
     public function test_trial_balance_pdf_uses_opening_balance_for_the_selected_fiscal_year(): void
     {
         OpeningBalance::create([
