@@ -22,7 +22,7 @@ class RolesSeeder extends Seeder
             'transactions.post', 'transactions.reverse', 'transactions.export',
             // Petty cash
             'petty-cash.view', 'petty-cash.create', 'petty-cash.edit', 'petty-cash.delete',
-            'petty-cash.approve', 'petty-cash.approve.auditor', 'petty-cash.reconcile', 'petty-cash.import-whatsapp',
+            'petty-cash.approve', 'petty-cash.approve.auditor', 'petty-cash.approve.finance-manager', 'petty-cash.reconcile', 'petty-cash.import-whatsapp',
             'petty-cash.document.upload', 'petty-cash.document.delete', 'petty-cash.export',
             // Parties
             'parties.view', 'parties.create', 'parties.edit', 'parties.delete', 'parties.link-external',

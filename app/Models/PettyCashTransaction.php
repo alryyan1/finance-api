@@ -13,6 +13,7 @@ class PettyCashTransaction extends Model
         'description', 'document_path', 'document_original_name', 'document_firebase_url', 'journal_entry_id',
         'manager_approved_at', 'manager_approved_by_user_id',
         'auditor_approved_at', 'auditor_approved_by_user_id', 'auditor_comment',
+        'finance_manager_approved_at', 'finance_manager_approved_by_user_id',
     ];
 
     protected $casts = [
@@ -20,6 +21,7 @@ class PettyCashTransaction extends Model
         'amount' => 'decimal:2',
         'manager_approved_at' => 'datetime',
         'auditor_approved_at' => 'datetime',
+        'finance_manager_approved_at' => 'datetime',
     ];
 
     public function sourceAccount(): BelongsTo
@@ -65,6 +67,11 @@ class PettyCashTransaction extends Model
     public function auditorApprovedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'auditor_approved_by_user_id');
+    }
+
+    public function financeManagerApprovedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'finance_manager_approved_by_user_id');
     }
 
     /**

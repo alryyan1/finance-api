@@ -24,6 +24,7 @@ class SettingController extends Controller
         'petty_cash_manager_user_id',
         'petty_cash_manager_whatsapp_phone',
         'petty_cash_auditor_user_id',
+        'petty_cash_finance_manager_user_id',
         'petty_cash_notify_on_create',
         'petty_cash_cash_account_id',
         'petty_cash_bank_account_id',
@@ -46,6 +47,7 @@ class SettingController extends Controller
     private const PETTY_CASH_INT_KEYS = [
         'petty_cash_manager_user_id',
         'petty_cash_auditor_user_id',
+        'petty_cash_finance_manager_user_id',
     ];
 
     private const PETTY_CASH_ACCOUNT_INT_KEYS = [
@@ -126,6 +128,7 @@ class SettingController extends Controller
             'petty_cash_manager_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'petty_cash_manager_whatsapp_phone' => ['nullable', 'string', 'max:20'],
             'petty_cash_auditor_user_id' => ['nullable', 'integer', 'exists:users,id'],
+            'petty_cash_finance_manager_user_id' => ['nullable', 'integer', 'exists:users,id'],
             'petty_cash_notify_on_create' => ['nullable', 'boolean'],
             'petty_cash_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'petty_cash_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],

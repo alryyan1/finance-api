@@ -84,6 +84,27 @@ class PettyCashApprovalService
     }
 
     /**
+     * Records the finance manager's review of a pending petty cash expense.
+     * Purely an informational stamp alongside the manager's and auditor's — it
+     * does not post the journal entry and does not gate the manager's
+     * approval. Idempotent, like approve() and approveAuditor().
+     */
+    public function approveFinanceManager(PettyCashTransaction $transaction, int $approverUserId): PettyCashTransaction
+    {
+        abort_if($transaction->type !== 'expense', 422, 'لا يخضع هذا النوع من الحركات للاعتماد.');
+
+        return DB::transaction(function () use ($transaction, $approverUserId) {
+            $transaction = PettyCashTransaction::whereKey($transaction->id)->lockForUpdate()->firstOrFail();
+
+            if ($transaction->finance_manager_approved_at === null) {
+                $transaction->update(['finance_manager_approved_at' => now(), 'finance_manager_approved_by_user_id' => $approverUserId]);
+            }
+
+            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name', 'financeManagerApprovedBy:id,name']);
+        });
+    }
+
+    /**
      * Sets or clears the auditor's free-text note on a transaction. Independent
      * of approveAuditor() — usable whether or not the transaction has been
      * audited yet, so the auditor can annotate a review after the fact.

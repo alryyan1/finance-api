@@ -36,7 +36,7 @@ class PettyCashPermissionsTest extends TestCase
 
         foreach ([
             'petty-cash.view', 'petty-cash.create', 'petty-cash.edit', 'petty-cash.delete',
-            'petty-cash.approve', 'petty-cash.approve.auditor', 'petty-cash.reconcile', 'petty-cash.import-whatsapp',
+            'petty-cash.approve', 'petty-cash.approve.auditor', 'petty-cash.approve.finance-manager', 'petty-cash.reconcile', 'petty-cash.import-whatsapp',
             'petty-cash.document.upload', 'petty-cash.document.delete', 'petty-cash.export',
         ] as $perm) {
             Permission::firstOrCreate(['name' => $perm, 'guard_name' => 'web']);
@@ -321,6 +321,43 @@ class PettyCashPermissionsTest extends TestCase
             'auditor_comment' => 'Looks fine',
         ])->assertOk();
         $this->assertSame('Looks fine', $txn->fresh()->auditor_comment);
+    }
+
+    // ── petty-cash.approve.finance-manager ──────────────────────────────────
+
+    public function test_approve_finance_manager_denied_without_permission(): void
+    {
+        $financeManager = $this->userWithOnly(null);
+        Setting::updateOrCreate(['key' => 'petty_cash_finance_manager_user_id'], ['value' => (string) $financeManager->id]);
+        $manager = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $manager->id]);
+        $txn = $this->makeExpense(['status' => 'approved', 'manager_approved_at' => now(), 'manager_approved_by_user_id' => $manager->id]);
+
+        $this->assertForbidden($this->actingAs($financeManager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager"));
+    }
+
+    public function test_approve_finance_manager_allowed_with_permission(): void
+    {
+        $financeManager = $this->userWithOnly('petty-cash.approve.finance-manager');
+        Setting::updateOrCreate(['key' => 'petty_cash_finance_manager_user_id'], ['value' => (string) $financeManager->id]);
+        $manager = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $manager->id]);
+        $txn = $this->makeExpense(['status' => 'approved', 'manager_approved_at' => now(), 'manager_approved_by_user_id' => $manager->id]);
+
+        $this->actingAs($financeManager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")->assertOk();
+        $this->assertNotNull($txn->fresh()->finance_manager_approved_at);
+    }
+
+    public function test_approve_finance_manager_still_blocked_for_non_designated_user_even_with_permission(): void
+    {
+        $designatedFinanceManager = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_finance_manager_user_id'], ['value' => (string) $designatedFinanceManager->id]);
+        $someoneElse = $this->userWithOnly('petty-cash.approve.finance-manager');
+        $txn = $this->makeExpense();
+
+        $this->actingAs($someoneElse)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")
+            ->assertStatus(403);
+        $this->assertNull($txn->fresh()->finance_manager_approved_at);
     }
 
     // ── petty-cash.reconcile ────────────────────────────────────────────────

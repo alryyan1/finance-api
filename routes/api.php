@@ -113,6 +113,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::delete('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'deleteDocument'])->middleware('permission:petty-cash.document.delete');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/manager', [PettyCashController::class, 'approveByManager'])->middleware('permission:petty-cash.approve');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/auditor', [PettyCashController::class, 'approveByAuditor'])->middleware('permission:petty-cash.approve.auditor');
+    Route::post('petty-cash/transactions/{pettyCashTransaction}/approve/finance-manager', [PettyCashController::class, 'approveByFinanceManager'])->middleware('permission:petty-cash.approve.finance-manager');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/auditor-comment', [PettyCashController::class, 'updateAuditorComment'])->middleware('permission:petty-cash.approve.auditor');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/reconcile', [PettyCashController::class, 'reconcile'])->middleware('permission:petty-cash.reconcile');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/notify', [PettyCashController::class, 'sendNotification'])->middleware('permission:petty-cash.edit');

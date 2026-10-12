@@ -562,6 +562,14 @@ class PettyCashController extends Controller
         return response()->json($service->approveAuditor($pettyCashTransaction, $auditorId));
     }
 
+    public function approveByFinanceManager(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
+    {
+        $financeManagerId = (int) Setting::where('key', 'petty_cash_finance_manager_user_id')->value('value');
+        abort_if(! $financeManagerId || $request->user()->id !== $financeManagerId, 403, 'غير مصرح لك باعتماد هذا المصروف.');
+
+        return response()->json($service->approveFinanceManager($pettyCashTransaction, $financeManagerId));
+    }
+
     public function updateAuditorComment(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
     {
         $auditorId = (int) Setting::where('key', 'petty_cash_auditor_user_id')->value('value');
