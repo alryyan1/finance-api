@@ -107,6 +107,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('petty-cash/transactions/excel', [PettyCashController::class, 'transactionsExcel'])->middleware('permission:petty-cash.export');
     Route::post('petty-cash/expenses', [PettyCashController::class, 'storeExpense'])->middleware('permission:petty-cash.create');
     Route::post('petty-cash/receipts', [PettyCashController::class, 'storeReceipt'])->middleware('permission:petty-cash.create');
+    Route::put('petty-cash/transactions/{pettyCashTransaction}', [PettyCashController::class, 'updateExpense'])->middleware('permission:petty-cash.edit');
     Route::delete('petty-cash/transactions/{pettyCashTransaction}', [PettyCashController::class, 'destroy'])->middleware('permission:petty-cash.delete');
     Route::get('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'document'])->middleware('permission:petty-cash.view');
     Route::post('petty-cash/transactions/{pettyCashTransaction}/document', [PettyCashController::class, 'uploadDocument'])->middleware('permission:petty-cash.document.upload');

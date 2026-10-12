@@ -386,7 +386,32 @@ class PettyCashPermissionsTest extends TestCase
             ->postJson('/api/petty-cash/reconcile-pending')->assertOk();
     }
 
-    // ── petty-cash.edit (notify / sync-expense-accounts) ────────────────────
+    // ── petty-cash.edit (notify / sync-expense-accounts / update expense) ───
+
+    public function test_update_expense_denied_without_edit_permission(): void
+    {
+        $txn = $this->makeExpense();
+        $response = $this->actingAs($this->userWithOnly(null))->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'amount' => 75,
+            'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+        ]);
+        $this->assertForbidden($response);
+        $this->assertSame('100.00', $txn->fresh()->amount);
+    }
+
+    public function test_update_expense_allowed_with_edit_permission(): void
+    {
+        $txn = $this->makeExpense();
+        $this->actingAs($this->userWithOnly('petty-cash.edit'))->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'amount' => 75,
+            'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+        ])->assertOk();
+        $this->assertSame('75.00', $txn->fresh()->amount);
+    }
 
     public function test_notify_denied_without_edit_permission(): void
     {

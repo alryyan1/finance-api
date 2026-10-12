@@ -453,6 +453,67 @@ class PettyCashApprovalTest extends TestCase
         $this->assertSame($firstJournalEntryId, $txn->fresh()->journal_entry_id);
     }
 
+    public function test_pending_expense_can_be_edited(): void
+    {
+        $txn = $this->createPendingExpense(50);
+        $party = Party::create(['name' => 'Supplier Co', 'type' => 'supplier']);
+
+        $response = $this->actingAs($this->other)->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'amount' => 80,
+            'beneficiary_name' => 'Updated name',
+            'party_id' => $party->id,
+            'contra_account_id' => $this->expenseAccount2->id,
+            'source_account_id' => $this->fundAccount2->id,
+            'description' => 'Updated description',
+        ])->assertOk();
+
+        $response->assertJsonPath('amount', '80.00');
+
+        $fresh = $txn->fresh();
+        $this->assertSame('80.00', $fresh->amount);
+        $this->assertSame('Updated name', $fresh->beneficiary_name);
+        $this->assertSame($party->id, $fresh->party_id);
+        $this->assertSame($this->expenseAccount2->id, $fresh->contra_account_id);
+        $this->assertSame($this->fundAccount2->id, $fresh->source_account_id);
+        $this->assertSame('Updated description', $fresh->description);
+        $this->assertNull($fresh->manager_approved_at);
+    }
+
+    public function test_editing_can_switch_an_expense_into_a_compound_one(): void
+    {
+        $txn = $this->createPendingExpense(100);
+
+        $this->actingAs($this->other)->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'source_account_id' => $this->fundAccount->id,
+            'lines' => [
+                ['contra_account_id' => $this->expenseAccount->id, 'amount' => 30],
+                ['contra_account_id' => $this->expenseAccount2->id, 'amount' => 70],
+            ],
+        ])->assertOk();
+
+        $fresh = $txn->fresh(['lines']);
+        $this->assertSame('100.00', $fresh->amount);
+        $this->assertNull($fresh->contra_account_id);
+        $this->assertCount(2, $fresh->lines);
+    }
+
+    public function test_approved_expense_cannot_be_edited(): void
+    {
+        $txn = $this->createPendingExpense(50);
+        $this->actingAs($this->manager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")->assertOk();
+
+        $this->actingAs($this->other)->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'amount' => 999,
+            'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+        ])->assertStatus(422);
+
+        $this->assertSame('50.00', $txn->fresh()->amount);
+    }
+
     public function test_deleting_a_pending_expense_removes_it(): void
     {
         $txn = $this->createPendingExpense(75);

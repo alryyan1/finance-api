@@ -53,6 +53,21 @@ class FirestoreApprovalService
     }
 
     /**
+     * Refreshes the amount/beneficiary/description on an existing mirror doc after
+     * the expense is edited while still pending — keeps the data behind an
+     * already-sent WhatsApp approval message in sync, without touching the
+     * approval or document fields.
+     */
+    public function updateMirrorDetails(PettyCashTransaction $transaction): void
+    {
+        $this->patch($this->documentPath((string) $transaction->id), [
+            'amount' => (float) $transaction->amount,
+            'beneficiary_name' => $transaction->beneficiary_name,
+            'description' => $transaction->description,
+        ], merge: true);
+    }
+
+    /**
      * Attach (or replace) the document link on a mirror doc that already exists —
      * used when a receipt is uploaded after the expense was created.
      */

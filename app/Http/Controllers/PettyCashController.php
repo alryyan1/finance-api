@@ -472,6 +472,82 @@ class PettyCashController extends Controller
     }
 
     /**
+     * PUT /petty-cash/transactions/{id} — edits a pending expense's fields (not
+     * its receipt document, which has its own upload/delete endpoints). Only
+     * allowed before the manager's approval: that approval is what posts the
+     * journal entry, so letting an already-approved expense change afterward
+     * would desync the two.
+     */
+    public function updateExpense(Request $request, PettyCashTransaction $pettyCashTransaction, FirestoreApprovalService $firestore): JsonResponse
+    {
+        abort_if($pettyCashTransaction->type !== 'expense', 422, 'لا يمكن تعديل هذا النوع من الحركات بهذه الطريقة.');
+        abort_if($pettyCashTransaction->manager_approved_at !== null, 422, 'لا يمكن تعديل مصروف تم اعتماده من المدير.');
+
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            'beneficiary_name' => ['nullable', 'string', 'max:255'],
+            'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'description' => ['nullable', 'string', 'max:500'],
+            'amount' => ['required_without:lines', 'nullable', 'numeric', 'min:0.01'],
+            'contra_account_id' => ['required_without:lines', 'nullable', 'integer', 'exists:accounts,id'],
+            'lines' => ['nullable', 'array', 'min:2'],
+            'lines.*.contra_account_id' => ['required_with:lines', 'integer', 'exists:accounts,id'],
+            'lines.*.amount' => ['required_with:lines', 'numeric', 'min:0.01'],
+            'source_account_id' => ['required_without:credit_lines', 'nullable', 'integer', 'exists:accounts,id'],
+            'credit_lines' => ['nullable', 'array', 'min:1'],
+            'credit_lines.*.source_account_id' => ['required_with:credit_lines', 'integer', 'exists:accounts,id'],
+            'credit_lines.*.amount' => ['required_with:credit_lines', 'numeric', 'min:0.01'],
+        ]);
+
+        if (FiscalYear::isDateLocked($data['date'])) {
+            abort(422, 'هذه الفترة مغلقة ولا يمكن تعديل مصروف لها.');
+        }
+
+        $isCompound = ! empty($data['lines']);
+        $amount = $isCompound ? collect($data['lines'])->sum('amount') : $data['amount'];
+
+        $isCompoundCredit = ! empty($data['credit_lines']);
+        if ($isCompoundCredit && abs(collect($data['credit_lines'])->sum('amount') - $amount) > 0.005) {
+            abort(422, 'مجموع حسابات التمويل يجب أن يساوي إجمالي المصروف');
+        }
+
+        DB::transaction(function () use ($pettyCashTransaction, $data, $isCompound, $isCompoundCredit, $amount) {
+            $pettyCashTransaction->update([
+                'source_account_id' => $isCompoundCredit ? null : $data['source_account_id'],
+                'date' => $data['date'],
+                'amount' => $amount,
+                'beneficiary_name' => $data['beneficiary_name'] ?? null,
+                'party_id' => $data['party_id'] ?? null,
+                'contra_account_id' => $isCompound ? null : $data['contra_account_id'],
+                'description' => $data['description'] ?? null,
+            ]);
+
+            $pettyCashTransaction->lines()->delete();
+            if ($isCompound) {
+                $pettyCashTransaction->lines()->createMany($data['lines']);
+            }
+
+            $pettyCashTransaction->creditLines()->delete();
+            if ($isCompoundCredit) {
+                $pettyCashTransaction->creditLines()->createMany($data['credit_lines']);
+            }
+        });
+
+        $pettyCashTransaction->refresh();
+
+        try {
+            $firestore->updateMirrorDetails($pettyCashTransaction);
+        } catch (\Throwable $e) {
+            Log::error('Failed to sync petty cash edit to Firestore', [
+                'transaction_id' => $pettyCashTransaction->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name']));
+    }
+
+    /**
      * (Re)send the WhatsApp approval-request template to the designated manager
      * for a pending expense. Synchronous — the caller waits for the send to
      * complete (or fail) and shows the result.
