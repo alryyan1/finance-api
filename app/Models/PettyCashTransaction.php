@@ -75,10 +75,10 @@ class PettyCashTransaction extends Model
     }
 
     /**
-     * The manager's approval is what completes the operation — it posts the journal entry.
+     * The finance manager's approval is what completes the operation — it posts the journal entry.
      */
     public function isReadyToPost(): bool
     {
-        return $this->manager_approved_at !== null;
+        return $this->finance_manager_approved_at !== null;
     }
 }

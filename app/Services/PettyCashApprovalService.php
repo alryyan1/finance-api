@@ -21,8 +21,10 @@ class PettyCashApprovalService
     ) {}
 
     /**
-     * Record the manager's approval for a pending petty cash expense — this is
-     * what posts the journal entry. Idempotent — re-approving an already
+     * Record the manager's approval for a pending petty cash expense. Purely an
+     * informational stamp alongside the auditor's and finance manager's — it
+     * does not post the journal entry (the finance manager's approval does
+     * that) and does not gate it. Idempotent — re-approving an already
      * approved transaction is a no-op, so redelivered webhooks are safe.
      */
     public function approve(PettyCashTransaction $transaction, int $approverUserId): PettyCashTransaction
@@ -40,9 +42,6 @@ class PettyCashApprovalService
 
             $transaction->update(['manager_approved_at' => now(), 'manager_approved_by_user_id' => $approverUserId]);
             $wasNewApproval = true;
-
-            $transaction->refresh();
-            $this->postJournalEntry($transaction);
 
             return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
         });
@@ -84,10 +83,10 @@ class PettyCashApprovalService
     }
 
     /**
-     * Records the finance manager's review of a pending petty cash expense.
-     * Purely an informational stamp alongside the manager's and auditor's — it
-     * does not post the journal entry and does not gate the manager's
-     * approval. Idempotent, like approve() and approveAuditor().
+     * Records the finance manager's approval for a pending petty cash expense
+     * — this is what posts the journal entry (moved here from the manager's
+     * approval). Idempotent — re-approving an already approved transaction is
+     * a no-op, so redelivered webhooks are safe.
      */
     public function approveFinanceManager(PettyCashTransaction $transaction, int $approverUserId): PettyCashTransaction
     {
@@ -98,6 +97,8 @@ class PettyCashApprovalService
 
             if ($transaction->finance_manager_approved_at === null) {
                 $transaction->update(['finance_manager_approved_at' => now(), 'finance_manager_approved_by_user_id' => $approverUserId]);
+                $transaction->refresh();
+                $this->postJournalEntry($transaction);
             }
 
             return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name', 'financeManagerApprovedBy:id,name']);
@@ -270,7 +271,7 @@ class PettyCashApprovalService
             $this->whatsapp->sendApprovalNotifications($transaction);
 
             if ($phone !== '') {
-                $this->whatsapp->sendText($phone, "تم إنشاء طلب الصرف رقم #{$transaction->id} بمبلغ ".number_format($amount, 2).' بانتظار اعتماد المدير.');
+                $this->whatsapp->sendText($phone, "تم إنشاء طلب الصرف رقم #{$transaction->id} بمبلغ ".number_format($amount, 2).' بانتظار الاعتماد.');
             }
         } catch (\Throwable $e) {
             Log::error('Failed to import WhatsApp petty cash request', [

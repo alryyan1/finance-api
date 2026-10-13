@@ -252,7 +252,7 @@ class PettyCashController extends Controller
 
         foreach ($transactions as $t) {
             $statusLabel = $t->type === 'expense'
-                ? ($t->status === 'approved' ? 'معتمد' : 'بانتظار اعتماد المدير')
+                ? ($t->status === 'approved' ? 'معتمد' : 'بانتظار اعتماد المدير المالي')
                 : '';
 
             $sheet->fromArray([
@@ -474,14 +474,14 @@ class PettyCashController extends Controller
     /**
      * PUT /petty-cash/transactions/{id} — edits a pending expense's fields (not
      * its receipt document, which has its own upload/delete endpoints). Only
-     * allowed before the manager's approval: that approval is what posts the
-     * journal entry, so letting an already-approved expense change afterward
-     * would desync the two.
+     * allowed before the finance manager's approval: that approval is what
+     * posts the journal entry, so letting an already-posted expense change
+     * afterward would desync the two.
      */
     public function updateExpense(Request $request, PettyCashTransaction $pettyCashTransaction, FirestoreApprovalService $firestore): JsonResponse
     {
         abort_if($pettyCashTransaction->type !== 'expense', 422, 'لا يمكن تعديل هذا النوع من الحركات بهذه الطريقة.');
-        abort_if($pettyCashTransaction->manager_approved_at !== null, 422, 'لا يمكن تعديل مصروف تم اعتماده من المدير.');
+        abort_if($pettyCashTransaction->status === 'approved', 422, 'لا يمكن تعديل مصروف تم اعتماده نهائياً.');
 
         $data = $request->validate([
             'date' => ['required', 'date'],

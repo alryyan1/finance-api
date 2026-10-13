@@ -21,6 +21,8 @@ class PettyCashApprovalTest extends TestCase
 
     private User $manager;
 
+    private User $financeManager;
+
     private User $other;
 
     private Account $fundAccount;
@@ -36,9 +38,11 @@ class PettyCashApprovalTest extends TestCase
         parent::setUp();
 
         $this->manager = User::factory()->create();
+        $this->financeManager = User::factory()->create();
         $this->other = User::factory()->create();
 
         Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $this->manager->id]);
+        Setting::updateOrCreate(['key' => 'petty_cash_finance_manager_user_id'], ['value' => (string) $this->financeManager->id]);
 
         $this->fundAccount = Account::create(['code' => '101', 'name' => 'Petty Cash', 'type' => 'asset', 'is_active' => true]);
         $this->fundAccount2 = Account::create(['code' => '102', 'name' => 'Petty Cash Vault', 'type' => 'asset', 'is_active' => true]);
@@ -77,7 +81,7 @@ class PettyCashApprovalTest extends TestCase
         $response->assertJsonPath('journal_entry_id', null);
     }
 
-    public function test_manager_approval_posts_journal_entry(): void
+    public function test_manager_approval_is_a_stamp_that_does_not_post_the_journal_entry(): void
     {
         $txn = $this->createPendingExpense(100);
 
@@ -85,10 +89,25 @@ class PettyCashApprovalTest extends TestCase
             ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager");
 
         $response->assertOk();
-        $response->assertJsonPath('status', 'approved');
+        $response->assertJsonPath('status', 'pending');
 
         $txn->refresh();
         $this->assertNotNull($txn->manager_approved_at);
+        $this->assertNull($txn->journal_entry_id);
+    }
+
+    public function test_finance_manager_approval_posts_journal_entry(): void
+    {
+        $txn = $this->createPendingExpense(100);
+
+        $response = $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager");
+
+        $response->assertOk();
+        $response->assertJsonPath('status', 'approved');
+
+        $txn->refresh();
+        $this->assertNotNull($txn->finance_manager_approved_at);
         $this->assertNotNull($txn->journal_entry_id);
 
         $entry = JournalEntry::find($txn->journal_entry_id);
@@ -138,8 +157,8 @@ class PettyCashApprovalTest extends TestCase
 
         $txn = PettyCashTransaction::findOrFail($response->json('id'));
 
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
+        $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")
             ->assertOk();
 
         $entry = JournalEntry::find($txn->fresh()->journal_entry_id);
@@ -178,8 +197,8 @@ class PettyCashApprovalTest extends TestCase
         ]);
         $txnId = $response->json('id');
 
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txnId}/approve/manager")
+        $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txnId}/approve/finance-manager")
             ->assertOk();
 
         $txn = PettyCashTransaction::find($txnId);
@@ -239,8 +258,8 @@ class PettyCashApprovalTest extends TestCase
         ]);
         $txnId = $response->json('id');
 
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txnId}/approve/manager")
+        $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txnId}/approve/finance-manager")
             ->assertOk();
 
         $txn = PettyCashTransaction::find($txnId);
@@ -255,8 +274,10 @@ class PettyCashApprovalTest extends TestCase
     public function test_reconcile_endpoint_applies_manager_approval_from_firestore(): void
     {
         // A manager's WhatsApp-tap approval lands in Firestore first — the app
-        // must catch MySQL up (and post the journal entry) the next time
-        // anyone opens the Petty Cash page, without the manager ever visiting the app.
+        // must catch MySQL up the next time anyone opens the Petty Cash page,
+        // without the manager ever visiting the app. It no longer posts the
+        // journal entry itself — that now happens on the finance manager's
+        // approval, which has no WhatsApp channel.
         $txn = $this->createPendingExpense(100);
 
         $this->mock(FirestoreApprovalService::class, function ($mock) use ($txn) {
@@ -268,12 +289,12 @@ class PettyCashApprovalTest extends TestCase
             ->postJson("/api/petty-cash/transactions/{$txn->id}/reconcile");
 
         $response->assertOk();
-        $response->assertJsonPath('status', 'approved');
+        $response->assertJsonPath('status', 'pending');
 
         $txn->refresh();
         $this->assertNotNull($txn->manager_approved_at);
-        $this->assertNotNull($txn->journal_entry_id);
-        $this->assertSame('approved', $txn->status);
+        $this->assertNull($txn->journal_entry_id);
+        $this->assertSame('pending', $txn->status);
     }
 
     public function test_reconcile_endpoint_pulls_down_a_receipt_attached_via_whatsapp(): void
@@ -438,18 +459,19 @@ class PettyCashApprovalTest extends TestCase
     {
         $txn = $this->createPendingExpense();
 
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
+        $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")
             ->assertOk();
 
-        $firstApprovedAt = $txn->fresh()->manager_approved_at;
+        $firstApprovedAt = $txn->fresh()->finance_manager_approved_at;
         $firstJournalEntryId = $txn->fresh()->journal_entry_id;
+        $this->assertNotNull($firstJournalEntryId);
 
-        $this->actingAs($this->manager)
-            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")
+        $this->actingAs($this->financeManager)
+            ->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")
             ->assertOk();
 
-        $this->assertTrue($firstApprovedAt->equalTo($txn->fresh()->manager_approved_at));
+        $this->assertTrue($firstApprovedAt->equalTo($txn->fresh()->finance_manager_approved_at));
         $this->assertSame($firstJournalEntryId, $txn->fresh()->journal_entry_id);
     }
 
@@ -502,7 +524,7 @@ class PettyCashApprovalTest extends TestCase
     public function test_approved_expense_cannot_be_edited(): void
     {
         $txn = $this->createPendingExpense(50);
-        $this->actingAs($this->manager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")->assertOk();
+        $this->actingAs($this->financeManager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")->assertOk();
 
         $this->actingAs($this->other)->putJson("/api/petty-cash/transactions/{$txn->id}", [
             'date' => now()->toDateString(),
@@ -512,6 +534,21 @@ class PettyCashApprovalTest extends TestCase
         ])->assertStatus(422);
 
         $this->assertSame('50.00', $txn->fresh()->amount);
+    }
+
+    public function test_manager_approved_but_not_yet_posted_expense_can_still_be_edited(): void
+    {
+        $txn = $this->createPendingExpense(50);
+        $this->actingAs($this->manager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")->assertOk();
+
+        $this->actingAs($this->other)->putJson("/api/petty-cash/transactions/{$txn->id}", [
+            'date' => now()->toDateString(),
+            'amount' => 65,
+            'contra_account_id' => $this->expenseAccount->id,
+            'source_account_id' => $this->fundAccount->id,
+        ])->assertOk();
+
+        $this->assertSame('65.00', $txn->fresh()->amount);
     }
 
     public function test_deleting_a_pending_expense_removes_it(): void
@@ -529,7 +566,7 @@ class PettyCashApprovalTest extends TestCase
     {
         $txn = $this->createPendingExpense(60);
 
-        $this->actingAs($this->manager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/manager")->assertOk();
+        $this->actingAs($this->financeManager)->postJson("/api/petty-cash/transactions/{$txn->id}/approve/finance-manager")->assertOk();
 
         $journalEntryId = $txn->fresh()->journal_entry_id;
         $this->assertNotNull($journalEntryId);

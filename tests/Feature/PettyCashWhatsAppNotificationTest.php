@@ -163,8 +163,11 @@ class PettyCashWhatsAppNotificationTest extends TestCase
 
     public function test_resend_notification_endpoint_rejects_already_approved_expense(): void
     {
-        $manager = User::factory()->create();
-        Setting::updateOrCreate(['key' => 'petty_cash_manager_user_id'], ['value' => (string) $manager->id]);
+        // The manager's approval is just a stamp now — the finance manager's
+        // approval is what posts the journal entry and flips status, which is
+        // what this endpoint actually gates on.
+        $financeManager = User::factory()->create();
+        Setting::updateOrCreate(['key' => 'petty_cash_finance_manager_user_id'], ['value' => (string) $financeManager->id]);
 
         Http::fake();
 
@@ -178,7 +181,7 @@ class PettyCashWhatsAppNotificationTest extends TestCase
             'source_account_id' => $this->fundAccountId,
         ])->json();
 
-        $this->actingAs($manager)->postJson("/api/petty-cash/transactions/{$created['id']}/approve/manager")->assertOk();
+        $this->actingAs($financeManager)->postJson("/api/petty-cash/transactions/{$created['id']}/approve/finance-manager")->assertOk();
 
         $this->actingAs($user)
             ->postJson("/api/petty-cash/transactions/{$created['id']}/notify")
