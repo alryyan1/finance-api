@@ -19,7 +19,9 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\PageSetup;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -232,23 +234,64 @@ class PettyCashController extends Controller
 
         $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
         $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'حالة الاعتماد', 'تاريخ الاعتماد', 'المبلغ'];
+        $lastCol = chr(ord('A') + count($headers) - 1);
+
+        $companyName = Setting::where('key', 'company_name')->value('value') ?: 'التقرير المالي';
+
+        $parts = [];
+        if ($request->from && $request->to) {
+            $parts[] = "الفترة من {$request->from} إلى {$request->to}";
+        } elseif ($request->from) {
+            $parts[] = "من {$request->from}";
+        } elseif ($request->to) {
+            $parts[] = "إلى {$request->to}";
+        }
+        if ($request->type) {
+            $parts[] = $typeLabels[$request->type];
+        }
+        $subtitle = implode('   |   ', $parts) ?: 'جميع الحركات';
 
         $spreadsheet = new Spreadsheet;
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('حركات صندوق النثريات');
         $sheet->setRightToLeft(true);
-        $sheet->fromArray($headers, null, 'A1');
 
-        $lastCol = chr(ord('A') + count($headers) - 1);
-        $sheet->getStyle("A1:{$lastCol}1")->applyFromArray([
-            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
-            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1565C0']],
+        // Report header: company name, report title, active filters
+        $sheet->setCellValue('A1', $companyName);
+        $sheet->mergeCells("A1:{$lastCol}1");
+        $sheet->getStyle('A1')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 14, 'color' => ['rgb' => '0F172A']],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
         ]);
 
-        $row = 2;
+        $sheet->setCellValue('A2', 'حركات صندوق النثريات');
+        $sheet->mergeCells("A2:{$lastCol}2");
+        $sheet->getStyle('A2')->applyFromArray([
+            'font' => ['bold' => true, 'size' => 12, 'color' => ['rgb' => '1565C0']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $sheet->setCellValue('A3', $subtitle);
+        $sheet->mergeCells("A3:{$lastCol}3");
+        $sheet->getStyle('A3')->applyFromArray([
+            'font' => ['italic' => true, 'size' => 10, 'color' => ['rgb' => '64748B']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $headerRow = 5;
+        $sheet->fromArray($headers, null, "A{$headerRow}");
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$headerRow}")->applyFromArray([
+            'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '1565C0']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+        ]);
+        $sheet->getRowDimension($headerRow)->setRowHeight(20);
+
+        $row = $headerRow + 1;
+        $firstDataRow = $row;
         $totalExpense = 0.0;
         $totalReplenishment = 0.0;
+        $odd = false;
 
         foreach ($transactions as $t) {
             $statusLabel = $t->type === 'expense'
@@ -267,18 +310,25 @@ class PettyCashController extends Controller
                 (float) $t->amount,
             ], null, "A{$row}");
 
+            if ($odd) {
+                $sheet->getStyle("A{$row}:{$lastCol}{$row}")->applyFromArray([
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8FAFC']],
+                ]);
+            }
+
             if ($t->type === 'expense') {
                 $totalExpense += (float) $t->amount;
             } else {
                 $totalReplenishment += (float) $t->amount;
             }
+            $odd = ! $odd;
             $row++;
         }
 
         $lastDataRow = $row - 1;
-        if ($lastDataRow >= 2) {
-            $sheet->getStyle("A2:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("I2:I{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+        if ($lastDataRow >= $firstDataRow) {
+            $sheet->getStyle("A{$firstDataRow}:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+            $sheet->getStyle("I{$firstDataRow}:I{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
         }
 
         $row++;
@@ -297,10 +347,51 @@ class PettyCashController extends Controller
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
         ]);
         $sheet->getStyle("I{$firstTotalsRow}:I{$row}")->getNumberFormat()->setFormatCode('#,##0');
+        $lastTotalsRow = $row;
+
+        // Thin borders around the whole table (header + data + totals)
+        $sheet->getStyle("A{$headerRow}:{$lastCol}{$lastTotalsRow}")->applyFromArray([
+            'borders' => [
+                'allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'CBD5E1']],
+            ],
+        ]);
 
         foreach (range('A', $lastCol) as $col) {
             $sheet->getColumnDimension($col)->setAutoSize(true);
         }
+
+        // Signature block: finance manager + auditor sign-off
+        $sigRow = $lastTotalsRow + 3;
+        $sheet->setCellValue("A{$sigRow}", '____________________________');
+        $sheet->mergeCells("A{$sigRow}:C{$sigRow}");
+        $sheet->setCellValue("F{$sigRow}", '____________________________');
+        $sheet->mergeCells("F{$sigRow}:H{$sigRow}");
+        $sheet->getStyle("A{$sigRow}:{$lastCol}{$sigRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+
+        $sigLabelRow = $sigRow + 1;
+        $sheet->setCellValue("A{$sigLabelRow}", 'المدير المالي');
+        $sheet->mergeCells("A{$sigLabelRow}:C{$sigLabelRow}");
+        $sheet->setCellValue("F{$sigLabelRow}", 'المراجع');
+        $sheet->mergeCells("F{$sigLabelRow}:H{$sigLabelRow}");
+        $sheet->getStyle("A{$sigLabelRow}:{$lastCol}{$sigLabelRow}")->applyFromArray([
+            'font' => ['bold' => true],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $printedRow = $sigLabelRow + 2;
+        $sheet->setCellValue("A{$printedRow}", 'تاريخ الطباعة: ' . now()->format('Y-m-d H:i'));
+        $sheet->mergeCells("A{$printedRow}:{$lastCol}{$printedRow}");
+        $sheet->getStyle("A{$printedRow}")->applyFromArray([
+            'font' => ['italic' => true, 'size' => 9, 'color' => ['rgb' => '94A3B8']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+
+        $sheet->getPageSetup()
+            ->setOrientation(PageSetup::ORIENTATION_LANDSCAPE)
+            ->setFitToWidth(1)
+            ->setFitToHeight(0);
+        $sheet->getPageSetup()->setPrintArea("A1:{$lastCol}{$printedRow}");
+        $sheet->freezePane('A' . ($headerRow + 1));
 
         $writer = new Xlsx($spreadsheet);
         $filename = 'petty-cash-transactions.xlsx';
