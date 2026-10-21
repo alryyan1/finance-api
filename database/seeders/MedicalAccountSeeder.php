@@ -34,6 +34,7 @@ class MedicalAccountSeeder extends Seeder
             // 112 المدينون والذمم التجارية
             ['code' => '112',    'name' => 'المدينون والذمم التجارية',                                     'type' => 'asset',     'sub_type' => 'sub',    'parent' => '11'],
             ['code' => '1121',   'name' => 'ذمم شركات التأمين',                                            'type' => 'asset',     'sub_type' => 'sub',    'parent' => '112'],
+            ['code' => '112101', 'name' => 'ذمم شركات التأمين المستحقة (التحملات)',                       'type' => 'asset',     'sub_type' => 'detail', 'parent' => '1121'],
 
             // ========== 2. الالتزامات (Liabilities) ==========
             ['code' => '2',      'name' => 'الخصوم والالتزامات',                                           'type' => 'liability', 'sub_type' => 'main',   'parent' => null],
@@ -42,6 +43,7 @@ class MedicalAccountSeeder extends Seeder
             // 211 أرصدة دائنة أخرى
             ['code' => '211',    'name' => 'أرصدة دائنة أخرى',                                            'type' => 'liability', 'sub_type' => 'sub',    'parent' => '21'],
             ['code' => '2111',   'name' => 'مستحقات الأطباء (محفظة الذمم الخاصة بالأطباء)',               'type' => 'liability', 'sub_type' => 'sub',    'parent' => '211'],
+            ['code' => '211101', 'name' => 'ذمم أتعاب الأطباء المستحقة الدفع',                            'type' => 'liability', 'sub_type' => 'detail', 'parent' => '2111'],
 
             // 212 الموردون
             ['code' => '212',    'name' => 'الموردون (ذمم دائنة تجارية)',                                  'type' => 'liability', 'sub_type' => 'sub',    'parent' => '21'],
@@ -70,9 +72,11 @@ class MedicalAccountSeeder extends Seeder
             ['code' => '411',    'name' => 'إيرادات الكشوفات والخدمات الطبية',                             'type' => 'revenue',   'sub_type' => 'sub',    'parent' => '41'],
             ['code' => '411101', 'name' => 'إيرادات كشوفات عيادة (أ) - نقدي وتأمين',                     'type' => 'revenue',   'sub_type' => 'detail', 'parent' => '411'],
             ['code' => '411102', 'name' => 'إيرادات كشوفات عيادة (ب) - نقدي وتأمين',                     'type' => 'revenue',   'sub_type' => 'detail', 'parent' => '411'],
+            ['code' => '411103', 'name' => 'إيرادات تحملات التأمين (Co-payment)',                        'type' => 'revenue',   'sub_type' => 'detail', 'parent' => '411'],
 
             // 412 إيرادات المختبر والتحاليل الطبية
             ['code' => '412',    'name' => 'إيرادات المختبر والتحاليل الطبية',                             'type' => 'revenue',   'sub_type' => 'sub',    'parent' => '41'],
+            ['code' => '412101', 'name' => 'إيرادات تحاليل وفحوصات المختبر',                              'type' => 'revenue',   'sub_type' => 'detail', 'parent' => '412'],
 
             // 413 مردودات ومسموحات الإيرادات (حساب عكسي)
             ['code' => '413',    'name' => 'مردودات ومسموحات الإيرادات',                                   'type' => 'revenue',   'sub_type' => 'sub',    'parent' => '41'],

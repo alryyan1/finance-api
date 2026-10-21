@@ -52,6 +52,7 @@ class PartyResolver
         return match ($sourceType) {
             'client' => 'customer',
             'supplier' => 'supplier',
+            'doctor' => 'doctor',
             default => 'other',
         };
     }
