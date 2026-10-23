@@ -41,13 +41,13 @@ class PartyController extends Controller
     public function index(): JsonResponse
     {
         return response()->json(
-            Party::with('account:id,code,name')->orderBy('name')->get()
+            Party::with(['account:id,code,name', 'category:id,name'])->orderBy('id', 'desc')->get()
         );
     }
 
     public function show(Party $party): JsonResponse
     {
-        return response()->json($party->load('account:id,code,name'));
+        return response()->json($party->load(['account:id,code,name', 'category:id,name']));
     }
 
     public function store(Request $request): JsonResponse
@@ -59,12 +59,13 @@ class PartyController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
             'address' => ['nullable', 'string'],
             'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'category_id' => ['nullable', 'integer', 'exists:party_categories,id'],
             'is_active' => ['boolean'],
         ]);
 
         $party = Party::create($validated);
 
-        return response()->json($party->load('account:id,code,name'), 201);
+        return response()->json($party->load(['account:id,code,name', 'category:id,name']), 201);
     }
 
     public function update(Request $request, Party $party): JsonResponse
@@ -76,12 +77,13 @@ class PartyController extends Controller
             'email' => ['nullable', 'email', 'max:255'],
             'address' => ['nullable', 'string'],
             'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'category_id' => ['nullable', 'integer', 'exists:party_categories,id'],
             'is_active' => ['boolean'],
         ]);
 
         $party->update($validated);
 
-        return response()->json($party->fresh()->load('account:id,code,name'));
+        return response()->json($party->fresh()->load(['account:id,code,name', 'category:id,name']));
     }
 
     public function destroy(Party $party): JsonResponse

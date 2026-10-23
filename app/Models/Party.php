@@ -7,15 +7,21 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Party extends Model
 {
-    protected $fillable = ['name', 'type', 'phone', 'email', 'address', 'account_id', 'is_active'];
+    protected $fillable = ['name', 'type', 'phone', 'email', 'address', 'account_id', 'category_id', 'is_active'];
 
     protected $casts = [
-        'is_active'  => 'boolean',
+        'is_active' => 'boolean',
         'account_id' => 'integer',
+        'category_id' => 'integer',
     ];
 
     public function account(): BelongsTo
     {
         return $this->belongsTo(Account::class);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(PartyCategory::class, 'category_id');
     }
 }

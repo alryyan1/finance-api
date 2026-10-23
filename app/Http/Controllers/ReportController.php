@@ -97,6 +97,13 @@ class ReportController extends Controller
         return response()->json($this->balanceSheetHorizontalData($request));
     }
 
+    public function partyCategoryBalance(Request $request): JsonResponse
+    {
+        ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+
+        return response()->json($this->partyCategoryBalanceData($from, $to));
+    }
+
     // ────────────────────────────── PDF endpoints ───────────────────────────────
 
     public function trialBalancePdf(Request $request): Response
@@ -744,6 +751,36 @@ class ReportController extends Controller
         return $pdf->respond('statement-of-equity.pdf');
     }
 
+    public function partyCategoryBalancePdf(Request $request): Response
+    {
+        ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+        $data = $this->partyCategoryBalanceData($from, $to);
+
+        $pdf = PdfReport::make('أرصدة فئات الأطراف', "الفترة من {$from} إلى {$to}");
+
+        $cols = [70, 40, 40, 44];
+        $pdf->tableHead(['التصنيف', 'مدين', 'دائن', 'الرصيد'], $cols);
+
+        $side = fn (string $s) => $s === 'debit' ? ' م' : ' د';
+        $odd = false;
+        foreach ($data['rows'] as $row) {
+            $pdf->SetFillColor($odd ? 249 : 255, $odd ? 250 : 255, $odd ? 251 : 255);
+            $pdf->Cell($cols[0], 7, $row['category_name'], 1, 0, 'R', true);
+            $pdf->Cell($cols[1], 7, PdfReport::n($row['debit']), 1, 0, 'C', true);
+            $pdf->Cell($cols[2], 7, PdfReport::n($row['credit']), 1, 0, 'C', true);
+            $pdf->Cell($cols[3], 7, PdfReport::n($row['balance']).$side($row['balance_side']), 1, 1, 'C', true);
+            $odd = ! $odd;
+        }
+
+        $t = $data['totals'];
+        $pdf->totalsRow(
+            ['الإجمالي', PdfReport::n($t['debit']), PdfReport::n($t['credit']), PdfReport::n($t['balance']).$side($t['balance_side'])],
+            $cols
+        );
+
+        return $pdf->respond('party-category-balance.pdf');
+    }
+
     // ────────────────────────────── Excel endpoints ─────────────────────────────
 
     public function trialBalanceExcel(Request $request): StreamedResponse
@@ -1147,6 +1184,39 @@ class ReportController extends Controller
         return $this->xlsx($spreadsheet, 'statement-of-equity.xlsx');
     }
 
+    public function partyCategoryBalanceExcel(Request $request): StreamedResponse
+    {
+        ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+        $data = $this->partyCategoryBalanceData($from, $to);
+
+        [$spreadsheet, $sheet] = $this->newSheet('أرصدة فئات الأطراف');
+        $this->titleRows($sheet, 'أرصدة فئات الأطراف', "الفترة من {$from} إلى {$to}", 'D');
+
+        $sheet->fromArray(['التصنيف', 'مدين', 'دائن', 'الرصيد'], null, 'A4');
+        $this->styleHeader($sheet, 'A4:D4');
+        $row = 5;
+
+        foreach ($data['rows'] as $r) {
+            $sheet->fromArray([
+                $r['category_name'], (float) $r['debit'], (float) $r['credit'],
+                ($r['balance_side'] === 'debit' ? 1 : -1) * (float) $r['balance'],
+            ], null, "A{$row}");
+            $row++;
+        }
+
+        $t = $data['totals'];
+        $sheet->setCellValue("A{$row}", 'الإجمالي');
+        $sheet->setCellValue("B{$row}", (float) $t['debit']);
+        $sheet->setCellValue("C{$row}", (float) $t['credit']);
+        $sheet->setCellValue("D{$row}", ($t['balance_side'] === 'debit' ? 1 : -1) * (float) $t['balance']);
+        $this->styleTotals($sheet, "A{$row}:D{$row}");
+
+        $this->numberFormat($sheet, "B5:D{$row}");
+        $this->autoSize($sheet, 'D');
+
+        return $this->xlsx($spreadsheet, 'party-category-balance.xlsx');
+    }
+
     // ─────────────────────────── Excel helpers ──────────────────────────────────
 
     /** @return array{0: Spreadsheet, 1: Worksheet} */
@@ -1346,6 +1416,63 @@ class ReportController extends Controller
                 'balance_debit' => number_format($totalBalDebit, 2, '.', ''),
                 'balance_credit' => number_format($totalBalCredit, 2, '.', ''),
                 'balanced' => abs($totalBalDebit - $totalBalCredit) < 0.005,
+            ],
+        ];
+    }
+
+    /**
+     * Period-only (no opening-balance carryforward) debit/credit/balance totals
+     * grouped by party category. Lines without a party, or whose party has no
+     * category, are bucketed under category_id 0 / "بدون تصنيف".
+     */
+    private function partyCategoryBalanceData(string $from, string $to): array
+    {
+        $rows = DB::table('journal_entry_lines as l')
+            ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
+            ->join('parties as p', 'p.id', '=', 'l.party_id')
+            ->leftJoin('party_categories as pc', 'pc.id', '=', 'p.category_id')
+            ->where('e.is_posted', true)
+            ->whereBetween('e.date', [$from, $to])
+            ->select(
+                DB::raw('COALESCE(pc.id, 0) as category_id'),
+                DB::raw("COALESCE(pc.name, 'بدون تصنيف') as category_name"),
+                DB::raw('SUM(l.debit) as debit'),
+                DB::raw('SUM(l.credit) as credit'),
+            )
+            // Group by the raw columns (not the SELECT aliases) — MySQL's
+            // ONLY_FULL_GROUP_BY mode rejects grouping by an alias that wraps
+            // them in COALESCE().
+            ->groupBy('pc.id', 'pc.name')
+            ->orderBy('category_name')
+            ->get()
+            ->map(function ($r) {
+                $debit = (float) $r->debit;
+                $credit = (float) $r->credit;
+                $net = $debit - $credit;
+
+                return [
+                    'category_id' => (int) $r->category_id,
+                    'category_name' => $r->category_name,
+                    'debit' => number_format($debit, 2, '.', ''),
+                    'credit' => number_format($credit, 2, '.', ''),
+                    'balance' => number_format(abs($net), 2, '.', ''),
+                    'balance_side' => $net >= 0 ? 'debit' : 'credit',
+                ];
+            })->values();
+
+        $totalDebit = $rows->sum(fn ($r) => (float) $r['debit']);
+        $totalCredit = $rows->sum(fn ($r) => (float) $r['credit']);
+        $totalNet = $totalDebit - $totalCredit;
+
+        return [
+            'from' => $from,
+            'to' => $to,
+            'rows' => $rows,
+            'totals' => [
+                'debit' => number_format($totalDebit, 2, '.', ''),
+                'credit' => number_format($totalCredit, 2, '.', ''),
+                'balance' => number_format(abs($totalNet), 2, '.', ''),
+                'balance_side' => $totalNet >= 0 ? 'debit' : 'credit',
             ],
         ];
     }

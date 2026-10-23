@@ -9,6 +9,7 @@ use App\Http\Controllers\ExternalPartyMappingController;
 use App\Http\Controllers\FiscalYearController;
 use App\Http\Controllers\JournalEntryController;
 use App\Http\Controllers\OpeningBalanceController;
+use App\Http\Controllers\PartyCategoryController;
 use App\Http\Controllers\PartyController;
 use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\ReportController;
@@ -101,6 +102,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/statement-of-equity', [ReportController::class, 'statementOfEquity'])->middleware('permission:reports.view');
     Route::get('reports/statement-of-equity/pdf', [ReportController::class, 'statementOfEquityPdf'])->middleware('permission:reports.export');
     Route::get('reports/statement-of-equity/excel', [ReportController::class, 'statementOfEquityExcel'])->middleware('permission:reports.export');
+    Route::get('reports/party-category-balance', [ReportController::class, 'partyCategoryBalance'])->middleware('permission:reports.view');
+    Route::get('reports/party-category-balance/pdf', [ReportController::class, 'partyCategoryBalancePdf'])->middleware('permission:reports.export');
+    Route::get('reports/party-category-balance/excel', [ReportController::class, 'partyCategoryBalanceExcel'])->middleware('permission:reports.export');
 
     Route::get('petty-cash/transactions', [PettyCashController::class, 'transactions'])->middleware('permission:petty-cash.view');
     Route::get('petty-cash/transactions/pdf', [PettyCashController::class, 'transactionsPdf'])->middleware('permission:petty-cash.export');
@@ -171,6 +175,13 @@ Route::middleware('auth:sanctum')->group(function () {
     // entry form's party field).
     Route::apiResource('parties', PartyController::class)
         ->middlewareFor(['index', 'show'], 'permission:parties.view|petty-cash.view|petty-cash.create|petty-cash.edit|reports.view|transactions.create|transactions.edit')
+        ->middlewareFor('store', 'permission:parties.create')
+        ->middlewareFor('update', 'permission:parties.edit')
+        ->middlewareFor('destroy', 'permission:parties.delete');
+
+    Route::apiResource('party-categories', PartyCategoryController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->middlewareFor('index', 'permission:parties.view')
         ->middlewareFor('store', 'permission:parties.create')
         ->middlewareFor('update', 'permission:parties.edit')
         ->middlewareFor('destroy', 'permission:parties.delete');
