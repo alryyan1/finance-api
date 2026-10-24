@@ -252,7 +252,8 @@ class PettyCashController extends Controller
         $amountCol = $lastCol;
         $totalsLabelCol = chr(ord($lastCol) - 1);
 
-        $approvalCell = fn (?\Illuminate\Support\Carbon $at) => $at ? $at->format('Y-m-d H:i') : 'بانتظار';
+        $approvalCell = fn (?\Illuminate\Support\Carbon $at) => $at ? 'معتمد' : 'غير معتمد';
+        $auditCell = fn (?\Illuminate\Support\Carbon $at) => $at ? 'مدقق' : 'غير مدقق';
 
         $companyName = Setting::where('key', 'company_name')->value('value') ?: 'التقرير المالي';
 
@@ -326,7 +327,7 @@ class PettyCashController extends Controller
                 $t->description ?? '',
                 $isExpense ? $approvalCell($t->manager_approved_at) : '',
                 $isExpense ? $approvalCell($t->finance_manager_approved_at) : '',
-                $isExpense ? $approvalCell($t->auditor_approved_at) : '',
+                $isExpense ? $auditCell($t->auditor_approved_at) : '',
                 (float) $t->amount,
             ], null, "A{$row}");
 
