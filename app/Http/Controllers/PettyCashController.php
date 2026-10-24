@@ -233,8 +233,12 @@ class PettyCashController extends Controller
             ->get();
 
         $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
-        $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'حالة الاعتماد', 'تاريخ الاعتماد', 'المبلغ'];
+        $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'اعتماد المدير العام', 'تدقيق المراجع', 'اعتماد المدير المالي', 'المبلغ'];
         $lastCol = chr(ord('A') + count($headers) - 1);
+        $amountCol = $lastCol;
+        $totalsLabelCol = chr(ord($lastCol) - 1);
+
+        $approvalCell = fn (?\Illuminate\Support\Carbon $at) => $at ? $at->format('Y-m-d H:i') : 'بانتظار';
 
         $companyName = Setting::where('key', 'company_name')->value('value') ?: 'التقرير المالي';
 
@@ -294,9 +298,7 @@ class PettyCashController extends Controller
         $odd = false;
 
         foreach ($transactions as $t) {
-            $statusLabel = $t->type === 'expense'
-                ? ($t->status === 'approved' ? 'معتمد' : 'بانتظار اعتماد المدير المالي')
-                : '';
+            $isExpense = $t->type === 'expense';
 
             $sheet->fromArray([
                 $t->date->format('Y-m-d'),
@@ -305,8 +307,9 @@ class PettyCashController extends Controller
                 $this->contraAccountLabel($t),
                 $this->sourceAccountLabel($t),
                 $t->description ?? '',
-                $statusLabel,
-                $t->manager_approved_at?->format('Y-m-d H:i') ?? '',
+                $isExpense ? $approvalCell($t->manager_approved_at) : '',
+                $isExpense ? $approvalCell($t->auditor_approved_at) : '',
+                $isExpense ? $approvalCell($t->finance_manager_approved_at) : '',
                 (float) $t->amount,
             ], null, "A{$row}");
 
@@ -328,25 +331,25 @@ class PettyCashController extends Controller
         $lastDataRow = $row - 1;
         if ($lastDataRow >= $firstDataRow) {
             $sheet->getStyle("A{$firstDataRow}:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
-            $sheet->getStyle("I{$firstDataRow}:I{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+            $sheet->getStyle("{$amountCol}{$firstDataRow}:{$amountCol}{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
         }
 
         $row++;
         $firstTotalsRow = $row;
-        $sheet->setCellValue("H{$row}", 'إجمالي المصروفات');
-        $sheet->setCellValue("I{$row}", $totalExpense);
+        $sheet->setCellValue("{$totalsLabelCol}{$row}", 'إجمالي المصروفات');
+        $sheet->setCellValue("{$amountCol}{$row}", $totalExpense);
         $row++;
-        $sheet->setCellValue("H{$row}", 'إجمالي التغذية');
-        $sheet->setCellValue("I{$row}", $totalReplenishment);
+        $sheet->setCellValue("{$totalsLabelCol}{$row}", 'إجمالي التغذية');
+        $sheet->setCellValue("{$amountCol}{$row}", $totalReplenishment);
         $row++;
-        $sheet->setCellValue("H{$row}", 'صافي التغيير');
-        $sheet->setCellValue("I{$row}", $totalReplenishment - $totalExpense);
+        $sheet->setCellValue("{$totalsLabelCol}{$row}", 'صافي التغيير');
+        $sheet->setCellValue("{$amountCol}{$row}", $totalReplenishment - $totalExpense);
 
-        $sheet->getStyle("H{$firstTotalsRow}:I{$row}")->applyFromArray([
+        $sheet->getStyle("{$totalsLabelCol}{$firstTotalsRow}:{$amountCol}{$row}")->applyFromArray([
             'font' => ['bold' => true],
             'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F1F5F9']],
         ]);
-        $sheet->getStyle("I{$firstTotalsRow}:I{$row}")->getNumberFormat()->setFormatCode('#,##0');
+        $sheet->getStyle("{$amountCol}{$firstTotalsRow}:{$amountCol}{$row}")->getNumberFormat()->setFormatCode('#,##0');
         $lastTotalsRow = $row;
 
         // Thin borders around the whole table (header + data + totals)
