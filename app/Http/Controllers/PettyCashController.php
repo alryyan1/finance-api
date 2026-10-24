@@ -247,7 +247,7 @@ class PettyCashController extends Controller
 
         $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
         $pendingApprovalLabels = ['manager' => 'المدير العام', 'auditor' => 'المراجع', 'finance_manager' => 'المدير المالي'];
-        $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'اعتماد المدير العام', 'تدقيق المراجع', 'اعتماد المدير المالي', 'المبلغ'];
+        $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'اعتماد المدير العام', 'اعتماد المدير المالي', 'تدقيق المراجع', 'المبلغ'];
         $lastCol = chr(ord('A') + count($headers) - 1);
         $amountCol = $lastCol;
         $totalsLabelCol = chr(ord($lastCol) - 1);
@@ -325,8 +325,8 @@ class PettyCashController extends Controller
                 $this->sourceAccountLabel($t),
                 $t->description ?? '',
                 $isExpense ? $approvalCell($t->manager_approved_at) : '',
-                $isExpense ? $approvalCell($t->auditor_approved_at) : '',
                 $isExpense ? $approvalCell($t->finance_manager_approved_at) : '',
+                $isExpense ? $approvalCell($t->auditor_approved_at) : '',
                 (float) $t->amount,
             ], null, "A{$row}");
 
