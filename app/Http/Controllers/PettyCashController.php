@@ -349,6 +349,8 @@ class PettyCashController extends Controller
         if ($lastDataRow >= $firstDataRow) {
             $sheet->getStyle("A{$firstDataRow}:{$lastCol}{$lastDataRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
             $sheet->getStyle("{$amountCol}{$firstDataRow}:{$amountCol}{$lastDataRow}")->getNumberFormat()->setFormatCode('#,##0');
+            // Native Excel column filter/sort dropdowns on the header row
+            $sheet->setAutoFilter("A{$headerRow}:{$lastCol}{$lastDataRow}");
         }
 
         $row++;
