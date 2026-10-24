@@ -41,6 +41,7 @@ class PettyCashController extends Controller
             'to' => ['nullable', 'date'],
             'search' => ['nullable', 'string', 'max:255'],
             'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'pending_approval' => ['nullable', 'in:manager,auditor,finance_manager'],
             'page' => ['nullable', 'integer', 'min:1'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
@@ -52,6 +53,8 @@ class PettyCashController extends Controller
             ->when($request->source_account_id, fn ($q) => $q->where(fn ($q2) => $q2
                 ->where('source_account_id', $request->source_account_id)
                 ->orWhereHas('creditLines', fn ($q3) => $q3->where('source_account_id', $request->source_account_id))))
+            ->when($request->pending_approval, fn ($q) => $q->where('type', 'expense')
+                ->whereNull($this->pendingApprovalColumn($request->string('pending_approval')->toString())))
             ->when($request->filled('search'), function ($q) use ($request) {
                 $term = trim((string) $request->string('search'));
                 $q->where(function ($q) use ($term) {
@@ -148,6 +151,7 @@ class PettyCashController extends Controller
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
             'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'pending_approval' => ['nullable', 'in:manager,auditor,finance_manager'],
         ]);
 
         $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
@@ -157,11 +161,14 @@ class PettyCashController extends Controller
             ->when($request->source_account_id, fn ($q) => $q->where(fn ($q2) => $q2
                 ->where('source_account_id', $request->source_account_id)
                 ->orWhereHas('creditLines', fn ($q3) => $q3->where('source_account_id', $request->source_account_id))))
+            ->when($request->pending_approval, fn ($q) => $q->where('type', 'expense')
+                ->whereNull($this->pendingApprovalColumn($request->string('pending_approval')->toString())))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
 
         $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
+        $pendingApprovalLabels = ['manager' => 'المدير العام', 'auditor' => 'المراجع', 'finance_manager' => 'المدير المالي'];
 
         $parts = [];
         if ($request->from && $request->to) {
@@ -173,6 +180,9 @@ class PettyCashController extends Controller
         }
         if ($request->type) {
             $parts[] = $typeLabels[$request->type];
+        }
+        if ($request->pending_approval) {
+            $parts[] = 'بانتظار اعتماد ' . $pendingApprovalLabels[$request->pending_approval];
         }
         $subtitle = implode('   |   ', $parts) ?: 'جميع الحركات';
 
@@ -219,6 +229,7 @@ class PettyCashController extends Controller
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
             'source_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'pending_approval' => ['nullable', 'in:manager,auditor,finance_manager'],
         ]);
 
         $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
@@ -228,11 +239,14 @@ class PettyCashController extends Controller
             ->when($request->source_account_id, fn ($q) => $q->where(fn ($q2) => $q2
                 ->where('source_account_id', $request->source_account_id)
                 ->orWhereHas('creditLines', fn ($q3) => $q3->where('source_account_id', $request->source_account_id))))
+            ->when($request->pending_approval, fn ($q) => $q->where('type', 'expense')
+                ->whereNull($this->pendingApprovalColumn($request->string('pending_approval')->toString())))
             ->orderBy('date')
             ->orderBy('id')
             ->get();
 
         $typeLabels = ['expense' => 'مصروف', 'replenishment' => 'تغذية'];
+        $pendingApprovalLabels = ['manager' => 'المدير العام', 'auditor' => 'المراجع', 'finance_manager' => 'المدير المالي'];
         $headers = ['التاريخ', 'النوع', 'المستفيد', 'الحساب المدين', 'الحساب الدائن', 'البيان', 'اعتماد المدير العام', 'تدقيق المراجع', 'اعتماد المدير المالي', 'المبلغ'];
         $lastCol = chr(ord('A') + count($headers) - 1);
         $amountCol = $lastCol;
@@ -252,6 +266,9 @@ class PettyCashController extends Controller
         }
         if ($request->type) {
             $parts[] = $typeLabels[$request->type];
+        }
+        if ($request->pending_approval) {
+            $parts[] = 'بانتظار اعتماد ' . $pendingApprovalLabels[$request->pending_approval];
         }
         $subtitle = implode('   |   ', $parts) ?: 'جميع الحركات';
 
@@ -808,6 +825,16 @@ class PettyCashController extends Controller
         }
 
         return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name']));
+    }
+
+    /** Maps the "pending_approval" filter value to the column it checks for NULL. */
+    private function pendingApprovalColumn(string $stage): string
+    {
+        return match ($stage) {
+            'manager' => 'manager_approved_at',
+            'auditor' => 'auditor_approved_at',
+            'finance_manager' => 'finance_manager_approved_at',
+        };
     }
 
     /** A compound transaction has no single contra account — join its lines' account names instead. */
