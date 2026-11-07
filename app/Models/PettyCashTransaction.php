@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class PettyCashTransaction extends Model
 {
     protected $fillable = [
-        'source_account_id', 'created_by_user_id', 'type', 'status', 'date', 'amount', 'beneficiary_name', 'party_id', 'contra_account_id',
+        'source_account_id', 'created_by_user_id', 'type', 'status', 'date', 'amount', 'beneficiary_name', 'party_id', 'cost_center_id', 'contra_account_id',
         'description', 'document_path', 'document_original_name', 'document_firebase_url', 'journal_entry_id',
         'manager_approved_at', 'manager_approved_by_user_id',
         'auditor_approved_at', 'auditor_approved_by_user_id', 'auditor_comment',
@@ -42,6 +42,11 @@ class PettyCashTransaction extends Model
     public function party(): BelongsTo
     {
         return $this->belongsTo(Party::class);
+    }
+
+    public function costCenter(): BelongsTo
+    {
+        return $this->belongsTo(CostCenter::class);
     }
 
     public function lines(): HasMany

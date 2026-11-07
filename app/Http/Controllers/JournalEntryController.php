@@ -30,7 +30,7 @@ class JournalEntryController extends Controller
 
         $q = JournalEntry::withSum('lines', 'debit')
             ->withCount('lines')
-            ->with('lines.account:id,code,name')
+            ->with('lines.account:id,code,name', 'lines.costCenter:id,name')
             ->orderByDesc('date')
             ->orderByDesc('id');
 
@@ -61,7 +61,7 @@ class JournalEntryController extends Controller
     public function show(JournalEntry $journalEntry): JsonResponse
     {
         return response()->json(
-            $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name')
+            $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name', 'lines.costCenter:id,name')
         );
     }
 
@@ -74,6 +74,7 @@ class JournalEntryController extends Controller
             'lines' => ['required', 'array', 'min:2'],
             'lines.*.account_id' => ['required', 'integer', 'exists:accounts,id'],
             'lines.*.party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'lines.*.cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
             'lines.*.debit' => ['required', 'numeric', 'min:0'],
             'lines.*.credit' => ['required', 'numeric', 'min:0'],
@@ -82,7 +83,7 @@ class JournalEntryController extends Controller
         $entry = $this->journalEntryService->create($data);
 
         return response()->json(
-            $entry->load('lines.account:id,code,name', 'lines.party:id,name'),
+            $entry->load('lines.account:id,code,name', 'lines.party:id,name', 'lines.costCenter:id,name'),
             201
         );
     }
@@ -100,6 +101,7 @@ class JournalEntryController extends Controller
             'lines' => ['required', 'array', 'min:2'],
             'lines.*.account_id' => ['required', 'integer', 'exists:accounts,id'],
             'lines.*.party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'lines.*.cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
             'lines.*.description' => ['nullable', 'string', 'max:255'],
             'lines.*.debit' => ['required', 'numeric', 'min:0'],
             'lines.*.credit' => ['required', 'numeric', 'min:0'],
@@ -108,7 +110,7 @@ class JournalEntryController extends Controller
         $journalEntry = $this->journalEntryService->update($journalEntry, $data);
 
         return response()->json(
-            $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name')
+            $journalEntry->load('lines.account:id,code,name', 'lines.party:id,name', 'lines.costCenter:id,name')
         );
     }
 

@@ -46,7 +46,7 @@ class PettyCashController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:200'],
         ]);
 
-        $query = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name'])
+        $query = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
@@ -154,7 +154,7 @@ class PettyCashController extends Controller
             'pending_approval' => ['nullable', 'in:manager,auditor,finance_manager'],
         ]);
 
-        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
+        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
@@ -232,7 +232,7 @@ class PettyCashController extends Controller
             'pending_approval' => ['nullable', 'in:manager,auditor,finance_manager'],
         ]);
 
-        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
+        $transactions = PettyCashTransaction::with(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])
             ->when($request->type, fn ($q) => $q->where('type', $request->type))
             ->when($request->from, fn ($q) => $q->where('date', '>=', $request->from))
             ->when($request->to, fn ($q) => $q->where('date', '<=', $request->to))
@@ -433,6 +433,7 @@ class PettyCashController extends Controller
             'date' => ['required', 'date'],
             'beneficiary_name' => ['nullable', 'string', 'max:255'],
             'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
             'description' => ['nullable', 'string', 'max:500'],
             'document' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
             'amount' => ['required_without:lines', 'nullable', 'numeric', 'min:0.01'],
@@ -475,6 +476,7 @@ class PettyCashController extends Controller
                 'amount' => $amount,
                 'beneficiary_name' => $data['beneficiary_name'] ?? null,
                 'party_id' => $data['party_id'] ?? null,
+                'cost_center_id' => $data['cost_center_id'] ?? null,
                 'contra_account_id' => $isCompound ? null : $data['contra_account_id'],
                 'description' => $data['description'] ?? null,
                 'document_path' => $documentPath,
@@ -513,7 +515,7 @@ class PettyCashController extends Controller
         $notifications = $notifyOnCreate ? $whatsapp->sendApprovalNotifications($transaction) : [];
 
         return response()->json([
-            ...$transaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])->toArray(),
+            ...$transaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name'])->toArray(),
             'notifications' => $notifications,
         ], 201);
     }
@@ -529,6 +531,7 @@ class PettyCashController extends Controller
             'date' => ['required', 'date'],
             'beneficiary_name' => ['nullable', 'string', 'max:255'],
             'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
             'description' => ['nullable', 'string', 'max:500'],
             'document' => ['nullable', 'file', 'mimes:jpg,jpeg,png,pdf', 'max:5120'],
             'amount' => ['required', 'numeric', 'min:0.01'],
@@ -556,6 +559,7 @@ class PettyCashController extends Controller
                 'amount' => $data['amount'],
                 'beneficiary_name' => $data['beneficiary_name'] ?? null,
                 'party_id' => $data['party_id'] ?? null,
+                'cost_center_id' => $data['cost_center_id'] ?? null,
                 'contra_account_id' => $data['contra_account_id'],
                 'description' => $data['description'] ?? null,
                 'document_path' => $documentPath,
@@ -581,7 +585,7 @@ class PettyCashController extends Controller
         }
 
         return response()->json(
-            $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'sourceAccount:id,code,name'])->toArray(),
+            $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'sourceAccount:id,code,name'])->toArray(),
             201
         );
     }
@@ -602,6 +606,7 @@ class PettyCashController extends Controller
             'date' => ['required', 'date'],
             'beneficiary_name' => ['nullable', 'string', 'max:255'],
             'party_id' => ['nullable', 'integer', 'exists:parties,id'],
+            'cost_center_id' => ['nullable', 'integer', 'exists:cost_centers,id'],
             'description' => ['nullable', 'string', 'max:500'],
             'amount' => ['required_without:lines', 'nullable', 'numeric', 'min:0.01'],
             'contra_account_id' => ['required_without:lines', 'nullable', 'integer', 'exists:accounts,id'],
@@ -633,6 +638,7 @@ class PettyCashController extends Controller
                 'amount' => $amount,
                 'beneficiary_name' => $data['beneficiary_name'] ?? null,
                 'party_id' => $data['party_id'] ?? null,
+                'cost_center_id' => $data['cost_center_id'] ?? null,
                 'contra_account_id' => $isCompound ? null : $data['contra_account_id'],
                 'description' => $data['description'] ?? null,
             ]);
@@ -659,7 +665,7 @@ class PettyCashController extends Controller
             ]);
         }
 
-        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name']));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name']));
     }
 
     /**
@@ -734,7 +740,7 @@ class PettyCashController extends Controller
         // already-rendered row (prev.map(t => byId.get(t.id) ?? t)), so any
         // relation missing here (sourceAccount, createdBy) blanks that column
         // until a full reload.
-        return response()->json($transaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name', 'managerApprovedBy:id,name']));
+        return response()->json($transaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'createdBy:id,name', 'managerApprovedBy:id,name']));
     }
 
     public function approveByManager(Request $request, PettyCashTransaction $pettyCashTransaction, PettyCashApprovalService $service): JsonResponse
@@ -803,7 +809,7 @@ class PettyCashController extends Controller
             }
         }
 
-        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name']));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name']));
     }
 
     /** DELETE /petty-cash/transactions/{id}/document — remove the attached receipt without replacing it. */
@@ -828,7 +834,7 @@ class PettyCashController extends Controller
             ]);
         }
 
-        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name']));
+        return response()->json($pettyCashTransaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'sourceAccount:id,code,name', 'creditLines.sourceAccount:id,code,name']));
     }
 
     /** Maps the "pending_approval" filter value to the column it checks for NULL. */

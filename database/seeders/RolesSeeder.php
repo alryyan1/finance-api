@@ -26,6 +26,8 @@ class RolesSeeder extends Seeder
             'petty-cash.document.upload', 'petty-cash.document.delete', 'petty-cash.export',
             // Parties
             'parties.view', 'parties.create', 'parties.edit', 'parties.delete', 'parties.link-external',
+            // Cost centers
+            'cost-centers.view', 'cost-centers.create', 'cost-centers.edit', 'cost-centers.delete',
             // Reports
             'reports.view', 'reports.export',
             // Settings
@@ -64,6 +66,7 @@ class RolesSeeder extends Seeder
             'petty-cash.view', 'petty-cash.create', 'petty-cash.edit', 'petty-cash.reconcile',
             'petty-cash.import-whatsapp', 'petty-cash.document.upload', 'petty-cash.export',
             'parties.view', 'parties.create', 'parties.edit', 'parties.link-external',
+            'cost-centers.view', 'cost-centers.create', 'cost-centers.edit',
             'reports.view', 'reports.export',
             'settings.view',
             'opening-balances.view', 'opening-balances.edit',
@@ -79,6 +82,7 @@ class RolesSeeder extends Seeder
             'transactions.view',
             'petty-cash.view',
             'parties.view',
+            'cost-centers.view',
             'reports.view',
             'fiscal-years.view',
             'dashboard.view',

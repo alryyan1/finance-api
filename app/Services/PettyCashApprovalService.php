@@ -37,13 +37,13 @@ class PettyCashApprovalService
             $transaction = PettyCashTransaction::whereKey($transaction->id)->lockForUpdate()->firstOrFail();
 
             if ($transaction->manager_approved_at !== null) {
-                return $transaction->load(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
+                return $transaction->load(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
             }
 
             $transaction->update(['manager_approved_at' => now(), 'manager_approved_by_user_id' => $approverUserId]);
             $wasNewApproval = true;
 
-            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
+            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name']);
         });
 
         // Firestore is a best-effort mirror, not the source of truth — never let it
@@ -78,7 +78,7 @@ class PettyCashApprovalService
                 $transaction->update(['auditor_approved_at' => now(), 'auditor_approved_by_user_id' => $approverUserId]);
             }
 
-            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
+            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
         });
     }
 
@@ -101,7 +101,7 @@ class PettyCashApprovalService
                 $this->postJournalEntry($transaction);
             }
 
-            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name', 'financeManagerApprovedBy:id,name']);
+            return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name', 'financeManagerApprovedBy:id,name']);
         });
     }
 
@@ -114,7 +114,7 @@ class PettyCashApprovalService
     {
         $transaction->update(['auditor_comment' => $comment]);
 
-        return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
+        return $transaction->fresh(['contraAccount:id,code,name', 'party:id,name', 'costCenter:id,name', 'lines.contraAccount:id,code,name', 'creditLines.sourceAccount:id,code,name', 'managerApprovedBy:id,name', 'auditorApprovedBy:id,name']);
     }
 
     /**
@@ -336,6 +336,7 @@ class PettyCashApprovalService
         $toEntryLine = fn (array $l, bool $isDebit) => [
             'account_id' => $l['account_id'],
             'party_id' => $l['party_id'],
+            'cost_center_id' => $transaction->cost_center_id,
             'debit' => $isDebit ? $l['amount'] : 0,
             'credit' => $isDebit ? 0 : $l['amount'],
             'description' => $desc,

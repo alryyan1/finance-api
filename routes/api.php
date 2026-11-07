@@ -4,6 +4,7 @@ use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AiController;
 use App\Http\Controllers\Auth\LoginController;
 use App\Http\Controllers\BackupController;
+use App\Http\Controllers\CostCenterController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\ExternalPartyMappingController;
 use App\Http\Controllers\FiscalYearController;
@@ -105,6 +106,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('reports/party-category-balance', [ReportController::class, 'partyCategoryBalance'])->middleware('permission:reports.view');
     Route::get('reports/party-category-balance/pdf', [ReportController::class, 'partyCategoryBalancePdf'])->middleware('permission:reports.export');
     Route::get('reports/party-category-balance/excel', [ReportController::class, 'partyCategoryBalanceExcel'])->middleware('permission:reports.export');
+    Route::get('reports/cost-center-balance', [ReportController::class, 'costCenterBalance'])->middleware('permission:reports.view');
+    Route::get('reports/cost-center-balance/pdf', [ReportController::class, 'costCenterBalancePdf'])->middleware('permission:reports.export');
+    Route::get('reports/cost-center-balance/excel', [ReportController::class, 'costCenterBalanceExcel'])->middleware('permission:reports.export');
 
     Route::get('petty-cash/transactions', [PettyCashController::class, 'transactions'])->middleware('permission:petty-cash.view');
     Route::get('petty-cash/transactions/pdf', [PettyCashController::class, 'transactionsPdf'])->middleware('permission:petty-cash.export');
@@ -185,6 +189,16 @@ Route::middleware('auth:sanctum')->group(function () {
         ->middlewareFor('store', 'permission:parties.create')
         ->middlewareFor('update', 'permission:parties.edit')
         ->middlewareFor('destroy', 'permission:parties.delete');
+
+    // Same reasoning as party-categories above: cost-centers.view is also
+    // needed by transactions.create/.edit (journal entry form's cost center
+    // field) and petty-cash.create/.edit (expense/receipt dialogs).
+    Route::apiResource('cost-centers', CostCenterController::class)
+        ->only(['index', 'store', 'update', 'destroy'])
+        ->middlewareFor('index', 'permission:cost-centers.view|petty-cash.create|petty-cash.edit|transactions.create|transactions.edit')
+        ->middlewareFor('store', 'permission:cost-centers.create')
+        ->middlewareFor('update', 'permission:cost-centers.edit')
+        ->middlewareFor('destroy', 'permission:cost-centers.delete');
 
     Route::get('journal-entries/pdf', [JournalEntryController::class, 'listPdf'])->middleware('permission:transactions.export');
     Route::get('journal-entries/excel', [JournalEntryController::class, 'listExcel'])->middleware('permission:transactions.export');
