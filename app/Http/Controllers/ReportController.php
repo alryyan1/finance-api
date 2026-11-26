@@ -107,8 +107,9 @@ class ReportController extends Controller
     public function costCenterBalance(Request $request): JsonResponse
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
+        $accountId = $this->validateCostCenterBalanceAccountFilter($request);
 
-        return response()->json($this->costCenterBalanceData($from, $to));
+        return response()->json($this->costCenterBalanceData($from, $to, $accountId));
     }
 
     // ────────────────────────────── PDF endpoints ───────────────────────────────
@@ -791,9 +792,17 @@ class ReportController extends Controller
     public function costCenterBalancePdf(Request $request): Response
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
-        $data = $this->costCenterBalanceData($from, $to);
+        $accountId = $this->validateCostCenterBalanceAccountFilter($request);
+        $data = $this->costCenterBalanceData($from, $to, $accountId);
 
-        $pdf = PdfReport::make('أرصدة مراكز التكلفة', "الفترة من {$from} إلى {$to}");
+        $subtitle = "الفترة من {$from} إلى {$to}";
+        if ($accountId) {
+            $account = Account::find($accountId);
+            if ($account) {
+                $subtitle .= "   —   الحساب: {$account->code} {$account->name}";
+            }
+        }
+        $pdf = PdfReport::make('أرصدة مراكز التكلفة', $subtitle);
 
         $cols = [70, 40, 40, 44];
         $pdf->tableHead(['مركز التكلفة', 'مدين', 'دائن', 'الرصيد'], $cols);
@@ -1257,10 +1266,19 @@ class ReportController extends Controller
     public function costCenterBalanceExcel(Request $request): StreamedResponse
     {
         ['from' => $from, 'to' => $to] = $this->validateDateRange($request);
-        $data = $this->costCenterBalanceData($from, $to);
+        $accountId = $this->validateCostCenterBalanceAccountFilter($request);
+        $data = $this->costCenterBalanceData($from, $to, $accountId);
+
+        $subtitle = "الفترة من {$from} إلى {$to}";
+        if ($accountId) {
+            $account = Account::find($accountId);
+            if ($account) {
+                $subtitle .= "   —   الحساب: {$account->code} {$account->name}";
+            }
+        }
 
         [$spreadsheet, $sheet] = $this->newSheet('أرصدة مراكز التكلفة');
-        $this->titleRows($sheet, 'أرصدة مراكز التكلفة', "الفترة من {$from} إلى {$to}", 'D');
+        $this->titleRows($sheet, 'أرصدة مراكز التكلفة', $subtitle, 'D');
 
         $sheet->fromArray(['مركز التكلفة', 'مدين', 'دائن', 'الرصيد'], null, 'A4');
         $this->styleHeader($sheet, 'A4:D4');
@@ -1375,6 +1393,16 @@ class ReportController extends Controller
         }
 
         return ['from' => $from, 'to' => $to, 'fiscal_year_id' => $fyId];
+    }
+
+    /** Optional account filter for the cost-center-balance report. */
+    private function validateCostCenterBalanceAccountFilter(Request $request): ?int
+    {
+        $request->validate([
+            'account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+        ]);
+
+        return $request->input('account_id') ? (int) $request->input('account_id') : null;
     }
 
     /** Resolve from/to dates, preferring fiscal_year_id if provided. */
@@ -1547,13 +1575,14 @@ class ReportController extends Controller
         ];
     }
 
-    private function costCenterBalanceData(string $from, string $to): array
+    private function costCenterBalanceData(string $from, string $to, ?int $accountId = null): array
     {
         $rows = DB::table('journal_entry_lines as l')
             ->join('journal_entries as e', 'e.id', '=', 'l.journal_entry_id')
             ->leftJoin('cost_centers as cc', 'cc.id', '=', 'l.cost_center_id')
             ->where('e.is_posted', true)
             ->whereBetween('e.date', [$from, $to])
+            ->when($accountId, fn ($q) => $q->where('l.account_id', $accountId))
             ->select(
                 DB::raw('COALESCE(cc.id, 0) as cost_center_id'),
                 DB::raw("COALESCE(cc.name, 'بدون مركز تكلفة') as cost_center_name"),
