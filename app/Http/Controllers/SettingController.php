@@ -36,6 +36,7 @@ class SettingController extends Controller
         'sales_cash_account_id',
         'sales_bank_account_id',
         'sales_discount_account_id',
+        'party_enabled',
     ];
 
     private const JOURNAL_INT_KEYS = [
@@ -110,6 +111,12 @@ class SettingController extends Controller
             ? true
             : filter_var($result['petty_cash_notify_on_create'], FILTER_VALIDATE_BOOLEAN);
 
+        // Party usage defaults to enabled, so installs that predate this
+        // setting keep showing the party field everywhere as before.
+        $result['party_enabled'] = $result['party_enabled'] === ''
+            ? true
+            : filter_var($result['party_enabled'], FILTER_VALIDATE_BOOLEAN);
+
         return response()->json($result);
     }
 
@@ -140,6 +147,7 @@ class SettingController extends Controller
             'sales_cash_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'sales_bank_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
             'sales_discount_account_id' => ['nullable', 'integer', 'exists:accounts,id'],
+            'party_enabled' => ['nullable', 'boolean'],
         ]);
 
         foreach ($data as $key => $value) {
